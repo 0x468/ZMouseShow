@@ -20,7 +20,8 @@ constexpr wchar_t instance_mutex_name[] = L"Local\\ZMouseShow.SingleInstance";
 constexpr UINT tray_icon_id = 1;
 constexpr UINT command_toggle_pause = 1001;
 constexpr UINT command_toggle_shake = 1002;
-constexpr UINT command_exit = 1003;
+constexpr UINT command_toggle_auto_timeout = 1003;
+constexpr UINT command_exit = 1004;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
 constexpr UINT_PTR overlay_timer_id = 1;
@@ -173,6 +174,8 @@ class Application final
         static_cast<void>(AppendMenuW(menu, pause_flags, command_toggle_pause, L"暂停(&P)"));
         const UINT shake_flags = MF_STRING | (shake_enabled_ ? MF_CHECKED : MF_UNCHECKED);
         static_cast<void>(AppendMenuW(menu, shake_flags, command_toggle_shake, L"晃动触发（实验）(&S)"));
+        const UINT timeout_flags = MF_STRING | (auto_timeout_enabled_ ? MF_CHECKED : MF_UNCHECKED);
+        static_cast<void>(AppendMenuW(menu, timeout_flags, command_toggle_auto_timeout, L"自动超时(&T)"));
         static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
         static_cast<void>(AppendMenuW(menu, MF_STRING, command_exit, L"退出(&X)"));
 
@@ -198,6 +201,26 @@ class Application final
         shake_detector_.reset();
     }
 
+    void toggle_auto_timeout() noexcept
+    {
+        auto_timeout_enabled_ = !auto_timeout_enabled_;
+        if (!overlay_manager_.visible())
+        {
+            return;
+        }
+
+        if (!auto_timeout_enabled_)
+        {
+            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            return;
+        }
+
+        const ULONGLONG now = GetTickCount64();
+        overlay_started_at_ = now;
+        last_cursor_move_at_ = now;
+        static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
+    }
+
     void activate_overlay(const bool suppress_ctrl_release) noexcept
     {
         POINT cursor{};
@@ -217,7 +240,10 @@ class Application final
         last_cursor_move_at_ = now;
         last_cursor_position_ = position;
         suppress_trigger_ctrl_release_ = suppress_ctrl_release;
-        static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
+        if (auto_timeout_enabled_)
+        {
+            static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
+        }
     }
 
     void dismiss_overlay() noexcept
@@ -261,7 +287,7 @@ class Application final
 
     void on_overlay_timer() noexcept
     {
-        if (!overlay_manager_.visible())
+        if (!auto_timeout_enabled_ || !overlay_manager_.visible())
         {
             static_cast<void>(KillTimer(window_, overlay_timer_id));
             return;
@@ -299,6 +325,9 @@ class Application final
                 return 0;
             case command_toggle_shake:
                 toggle_shake();
+                return 0;
+            case command_toggle_auto_timeout:
+                toggle_auto_timeout();
                 return 0;
             case command_exit:
                 DestroyWindow(window_);
@@ -496,6 +525,7 @@ class Application final
     bool tray_icon_added_{};
     bool paused_{};
     bool shake_enabled_{};
+    bool auto_timeout_enabled_{};
     bool suppress_trigger_ctrl_release_{};
     std::array<bool, 512> key_down_{};
     std::uint8_t mouse_buttons_{};

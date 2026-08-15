@@ -34,8 +34,8 @@ Generated Visual Studio solutions and projects live under `out/` and are not com
 - Strict double-left-Ctrl trigger through Raw Input
 - Optional experimental mouse-shake trigger, disabled by default and available from the tray menu
 - Per-monitor Region overlays with a DPI-aware transparent spotlight and cursor ring
-- Spotlight tracking, input dismissal, idle timeout, maximum duration, and display-change rebuild
+- Spotlight tracking, input dismissal, optional auto-timeout, and display-change rebuild
 
-Run `ZMouseShow.exe`, then press and release the left Ctrl key twice in quick succession without pressing any other key or mouse button. Right-click the tray icon to pause, enable the experimental shake trigger, or exit.
+Run `ZMouseShow.exe`, then press and release the left Ctrl key twice in quick succession without pressing any other key or mouse button. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to pause, enable the experimental shake trigger, enable the optional auto-timeout, or exit.
 
 See [the Chinese requirements](docs/需求规格说明书.md) for the full scope.
