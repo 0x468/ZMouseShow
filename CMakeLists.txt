@@ -36,6 +36,7 @@ target_include_directories(zmouse_core
 zmouse_apply_project_options(zmouse_core)
 
 add_executable(ZMouseShow WIN32
+    src/platform/overlay_manager.cpp
     src/platform/win32_main.cpp
     resources/ZMouseShow.rc
     resources/ZMouseShow.manifest
@@ -44,6 +45,7 @@ add_executable(ZMouseShow WIN32
 target_link_libraries(ZMouseShow
     PRIVATE
         ZMouseShow::Core
+        gdi32
         shell32
         user32
 )

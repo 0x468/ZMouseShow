@@ -1,7 +1,6 @@
 #pragma once
 
 #include "zmouse/input/double_ctrl_detector.hpp"
-
 #include <cstddef>
 #include <cstdint>
 #include <deque>

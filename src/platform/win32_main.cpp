@@ -3,6 +3,7 @@
 #include <hidusage.h>
 #include <shellapi.h>
 
+#include "overlay_manager.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include <array>
@@ -18,9 +19,14 @@ constexpr wchar_t instance_mutex_name[] = L"Local\\ZMouseShow.SingleInstance";
 
 constexpr UINT tray_icon_id = 1;
 constexpr UINT command_toggle_pause = 1001;
-constexpr UINT command_exit = 1002;
+constexpr UINT command_toggle_shake = 1002;
+constexpr UINT command_exit = 1003;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
+constexpr UINT_PTR overlay_timer_id = 1;
+constexpr UINT overlay_timer_interval_ms = 50;
+constexpr ULONGLONG overlay_idle_timeout_ms = 1'200;
+constexpr ULONGLONG overlay_max_duration_ms = 5'000;
 
 constexpr std::uint8_t mouse_left = 1U << 0U;
 constexpr std::uint8_t mouse_right = 1U << 1U;
@@ -36,7 +42,7 @@ class Application final
     int run()
     {
         taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
-        if (!create_window() || !register_raw_input() || !add_tray_icon())
+        if (!create_window() || !overlay_manager_.initialize(instance_) || !register_raw_input() || !add_tray_icon())
         {
             if (window_ != nullptr)
             {
@@ -165,6 +171,8 @@ class Application final
 
         const UINT pause_flags = MF_STRING | (paused_ ? MF_CHECKED : MF_UNCHECKED);
         static_cast<void>(AppendMenuW(menu, pause_flags, command_toggle_pause, L"暂停(&P)"));
+        const UINT shake_flags = MF_STRING | (shake_enabled_ ? MF_CHECKED : MF_UNCHECKED);
+        static_cast<void>(AppendMenuW(menu, shake_flags, command_toggle_shake, L"晃动触发（实验）(&S)"));
         static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
         static_cast<void>(AppendMenuW(menu, MF_STRING, command_exit, L"退出(&X)"));
 
@@ -179,8 +187,93 @@ class Application final
     void toggle_pause() noexcept
     {
         paused_ = !paused_;
+        dismiss_overlay();
         double_ctrl_detector_.reset();
         shake_detector_.reset();
+    }
+
+    void toggle_shake() noexcept
+    {
+        shake_enabled_ = !shake_enabled_;
+        shake_detector_.reset();
+    }
+
+    void activate_overlay(const bool suppress_ctrl_release) noexcept
+    {
+        POINT cursor{};
+        if (GetCursorPos(&cursor) == FALSE)
+        {
+            return;
+        }
+
+        const zmouse::overlay::Point position{cursor.x, cursor.y};
+        if (!overlay_manager_.show_at(position))
+        {
+            return;
+        }
+
+        const ULONGLONG now = GetTickCount64();
+        overlay_started_at_ = now;
+        last_cursor_move_at_ = now;
+        last_cursor_position_ = position;
+        suppress_trigger_ctrl_release_ = suppress_ctrl_release;
+        static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
+    }
+
+    void dismiss_overlay() noexcept
+    {
+        if (overlay_manager_.visible())
+        {
+            overlay_manager_.hide();
+        }
+        static_cast<void>(KillTimer(window_, overlay_timer_id));
+        suppress_trigger_ctrl_release_ = false;
+    }
+
+    void update_overlay_cursor() noexcept
+    {
+        if (!overlay_manager_.visible())
+        {
+            return;
+        }
+
+        POINT cursor{};
+        if (GetCursorPos(&cursor) == FALSE)
+        {
+            dismiss_overlay();
+            return;
+        }
+
+        const zmouse::overlay::Point position{cursor.x, cursor.y};
+        if (position == last_cursor_position_)
+        {
+            return;
+        }
+
+        last_cursor_position_ = position;
+        last_cursor_move_at_ = GetTickCount64();
+        overlay_manager_.move_to(position);
+        if (!overlay_manager_.visible())
+        {
+            static_cast<void>(KillTimer(window_, overlay_timer_id));
+        }
+    }
+
+    void on_overlay_timer() noexcept
+    {
+        if (!overlay_manager_.visible())
+        {
+            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            return;
+        }
+
+        update_overlay_cursor();
+        const ULONGLONG now = GetTickCount64();
+        if (now - last_cursor_move_at_ >= overlay_idle_timeout_ms ||
+            now - overlay_started_at_ >= overlay_max_duration_ms)
+        {
+            dismiss_overlay();
+        }
     }
 
     LRESULT handle_message(const UINT message, const WPARAM w_param, const LPARAM l_param) noexcept
@@ -204,6 +297,9 @@ class Application final
             case command_toggle_pause:
                 toggle_pause();
                 return 0;
+            case command_toggle_shake:
+                toggle_shake();
+                return 0;
             case command_exit:
                 DestroyWindow(window_);
                 return 0;
@@ -220,7 +316,19 @@ class Application final
             return 0;
 
         case message_activate:
-            // OverlayManager will consume this message in the next implementation milestone.
+            activate_overlay(w_param != 0);
+            return 0;
+
+        case WM_TIMER:
+            if (w_param == overlay_timer_id)
+            {
+                on_overlay_timer();
+                return 0;
+            }
+            break;
+
+        case WM_DISPLAYCHANGE:
+            static_cast<void>(overlay_manager_.rebuild());
             return 0;
 
         case WM_CLOSE:
@@ -228,6 +336,7 @@ class Application final
             return 0;
 
         case WM_DESTROY:
+            dismiss_overlay();
             remove_tray_icon();
             PostQuitMessage(0);
             return 0;
@@ -278,6 +387,19 @@ class Application final
         key_down_[key_id] = pressed;
 
         const bool left_control = keyboard.VKey == VK_LCONTROL || (keyboard.VKey == VK_CONTROL && !extended);
+
+        if (overlay_manager_.visible() && !repeated)
+        {
+            if (left_control && !pressed && suppress_trigger_ctrl_release_)
+            {
+                suppress_trigger_ctrl_release_ = false;
+            }
+            else
+            {
+                dismiss_overlay();
+            }
+        }
+
         bool any_other_key_down = false;
         for (std::size_t index = 0; index < key_down_.size(); ++index)
         {
@@ -301,13 +423,22 @@ class Application final
         };
         if (double_ctrl_detector_.process(event, any_other_key_down, mouse_buttons_ != 0))
         {
-            static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
+            static_cast<void>(PostMessageW(window_, message_activate, 1, 0));
         }
     }
 
     void handle_mouse(const RAWMOUSE& mouse) noexcept
     {
         const USHORT flags = mouse.usButtonFlags;
+        constexpr USHORT button_down_mask = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN |
+                                            RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_BUTTON_4_DOWN |
+                                            RI_MOUSE_BUTTON_5_DOWN;
+        constexpr USHORT wheel_mask = RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL;
+        if (overlay_manager_.visible() && (flags & (button_down_mask | wheel_mask)) != 0)
+        {
+            dismiss_overlay();
+        }
+
         update_mouse_button(flags, RI_MOUSE_LEFT_BUTTON_DOWN, RI_MOUSE_LEFT_BUTTON_UP, mouse_left);
         update_mouse_button(flags, RI_MOUSE_RIGHT_BUTTON_DOWN, RI_MOUSE_RIGHT_BUTTON_UP, mouse_right);
         update_mouse_button(flags, RI_MOUSE_MIDDLE_BUTTON_DOWN, RI_MOUSE_MIDDLE_BUTTON_UP, mouse_middle);
@@ -324,6 +455,11 @@ class Application final
             shake_detector_.on_mouse_buttons_changed(mouse_buttons_ != 0);
         }
 
+        if (overlay_manager_.visible() && (mouse.lLastX != 0 || mouse.lLastY != 0))
+        {
+            update_overlay_cursor();
+        }
+
         if (paused_ || !shake_enabled_ || (mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0)
         {
             return;
@@ -334,7 +470,7 @@ class Application final
             .dy = mouse.lLastY,
             .timestamp = GetTickCount64(),
         };
-        if (shake_detector_.process(movement, false))
+        if (shake_detector_.process(movement, overlay_manager_.visible()))
         {
             static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
         }
@@ -360,10 +496,15 @@ class Application final
     bool tray_icon_added_{};
     bool paused_{};
     bool shake_enabled_{};
+    bool suppress_trigger_ctrl_release_{};
     std::array<bool, 512> key_down_{};
     std::uint8_t mouse_buttons_{};
+    ULONGLONG overlay_started_at_{};
+    ULONGLONG last_cursor_move_at_{};
+    zmouse::overlay::Point last_cursor_position_{};
     zmouse::input::DoubleCtrlDetector double_ctrl_detector_{};
     zmouse::input::ShakeDetector shake_detector_{};
+    zmouse::platform::OverlayManager overlay_manager_{};
 };
 } // namespace
 

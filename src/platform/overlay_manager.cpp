@@ -1,0 +1,424 @@
+#include "overlay_manager.hpp"
+
+#include <windows.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+
+namespace zmouse::platform
+{
+namespace
+{
+constexpr wchar_t overlay_class_name[] = L"ZMouseShow.MonitorOverlay";
+constexpr wchar_t ring_class_name[] = L"ZMouseShow.CursorRing";
+constexpr BYTE dim_alpha = 153;
+constexpr std::int32_t spotlight_radius_dip = 120;
+constexpr std::int32_t ring_margin_dip = 18;
+constexpr std::int32_t ring_stroke_dip = 5;
+} // namespace
+
+OverlayManager::~OverlayManager()
+{
+    destroy_windows();
+    destroy_ring_bitmap();
+    if (ring_class_ != 0)
+    {
+        UnregisterClassW(ring_class_name, instance_);
+    }
+    if (overlay_class_ != 0)
+    {
+        UnregisterClassW(overlay_class_name, instance_);
+    }
+}
+
+bool OverlayManager::initialize(const HINSTANCE instance)
+{
+    instance_ = instance;
+    return register_window_classes() && rebuild();
+}
+
+bool OverlayManager::rebuild()
+{
+    const bool was_visible = visible_;
+    POINT cursor{};
+    static_cast<void>(GetCursorPos(&cursor));
+
+    hide();
+    destroy_windows();
+
+    if (EnumDisplayMonitors(nullptr, nullptr, enum_monitor_proc, reinterpret_cast<LPARAM>(this)) == FALSE ||
+        overlays_.empty() || !create_ring_window())
+    {
+        destroy_windows();
+        return false;
+    }
+
+    if (was_visible)
+    {
+        return show_at({cursor.x, cursor.y});
+    }
+    return true;
+}
+
+bool OverlayManager::show_at(const overlay::Point cursor)
+{
+    const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip, dpi_at(cursor));
+    if (!ensure_ring_bitmap(radius_px))
+    {
+        return false;
+    }
+
+    for (auto& monitor_overlay : overlays_)
+    {
+        if (!apply_hole(monitor_overlay, cursor, radius_px))
+        {
+            hide();
+            return false;
+        }
+
+        const auto width = monitor_overlay.bounds.right - monitor_overlay.bounds.left;
+        const auto height = monitor_overlay.bounds.bottom - monitor_overlay.bounds.top;
+        static_cast<void>(SetWindowPos(monitor_overlay.window, HWND_TOPMOST, monitor_overlay.bounds.left,
+                                       monitor_overlay.bounds.top, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW));
+        static_cast<void>(RedrawWindow(monitor_overlay.window, nullptr, nullptr,
+                                       RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN));
+    }
+
+    if (!update_ring_position(cursor))
+    {
+        hide();
+        return false;
+    }
+
+    visible_ = true;
+    return true;
+}
+
+void OverlayManager::move_to(const overlay::Point cursor)
+{
+    if (!visible_)
+    {
+        return;
+    }
+
+    const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip, dpi_at(cursor));
+    if (!ensure_ring_bitmap(radius_px))
+    {
+        hide();
+        return;
+    }
+
+    for (auto& monitor_overlay : overlays_)
+    {
+        if (!apply_hole(monitor_overlay, cursor, radius_px))
+        {
+            hide();
+            return;
+        }
+    }
+
+    if (!update_ring_position(cursor))
+    {
+        hide();
+    }
+}
+
+void OverlayManager::hide() noexcept
+{
+    if (ring_window_ != nullptr)
+    {
+        ShowWindow(ring_window_, SW_HIDE);
+    }
+    for (const auto& overlay : overlays_)
+    {
+        ShowWindow(overlay.window, SW_HIDE);
+    }
+    visible_ = false;
+}
+
+bool OverlayManager::visible() const noexcept
+{
+    return visible_;
+}
+
+LRESULT CALLBACK OverlayManager::overlay_window_proc(const HWND window, const UINT message, const WPARAM w_param,
+                                                     const LPARAM l_param) noexcept
+{
+    switch (message)
+    {
+    case WM_NCHITTEST:
+        return HTTRANSPARENT;
+    case WM_ERASEBKGND:
+    {
+        RECT client{};
+        static_cast<void>(GetClientRect(window, &client));
+        static_cast<void>(
+            FillRect(reinterpret_cast<HDC>(w_param), &client, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH))));
+        return 1;
+    }
+    case WM_PAINT:
+    {
+        PAINTSTRUCT paint{};
+        HDC dc = BeginPaint(window, &paint);
+        static_cast<void>(FillRect(dc, &paint.rcPaint, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH))));
+        EndPaint(window, &paint);
+        return 0;
+    }
+    default:
+        return DefWindowProcW(window, message, w_param, l_param);
+    }
+}
+
+LRESULT CALLBACK OverlayManager::ring_window_proc(const HWND window, const UINT message, const WPARAM w_param,
+                                                  const LPARAM l_param) noexcept
+{
+    if (message == WM_NCHITTEST)
+    {
+        return HTTRANSPARENT;
+    }
+    return DefWindowProcW(window, message, w_param, l_param);
+}
+
+BOOL CALLBACK OverlayManager::enum_monitor_proc(const HMONITOR monitor, HDC, LPRECT, const LPARAM data) noexcept
+{
+    auto* manager = reinterpret_cast<OverlayManager*>(data);
+    return manager->create_monitor_overlay(monitor) ? TRUE : FALSE;
+}
+
+bool OverlayManager::register_window_classes()
+{
+    WNDCLASSEXW overlay_class{};
+    overlay_class.cbSize = sizeof(overlay_class);
+    overlay_class.lpfnWndProc = overlay_window_proc;
+    overlay_class.hInstance = instance_;
+    overlay_class.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    overlay_class.lpszClassName = overlay_class_name;
+    overlay_class_ = RegisterClassExW(&overlay_class);
+    if (overlay_class_ == 0)
+    {
+        return false;
+    }
+
+    WNDCLASSEXW ring_class{};
+    ring_class.cbSize = sizeof(ring_class);
+    ring_class.lpfnWndProc = ring_window_proc;
+    ring_class.hInstance = instance_;
+    ring_class.lpszClassName = ring_class_name;
+    ring_class_ = RegisterClassExW(&ring_class);
+    return ring_class_ != 0;
+}
+
+bool OverlayManager::create_monitor_overlay(const HMONITOR monitor)
+{
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (GetMonitorInfoW(monitor, &info) == FALSE)
+    {
+        return false;
+    }
+
+    const auto width = info.rcMonitor.right - info.rcMonitor.left;
+    const auto height = info.rcMonitor.bottom - info.rcMonitor.top;
+    HWND window = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT,
+                                  overlay_class_name, nullptr, WS_POPUP, info.rcMonitor.left, info.rcMonitor.top, width,
+                                  height, nullptr, nullptr, instance_, nullptr);
+    if (window == nullptr || SetLayeredWindowAttributes(window, 0, dim_alpha, LWA_ALPHA) == FALSE)
+    {
+        if (window != nullptr)
+        {
+            DestroyWindow(window);
+        }
+        return false;
+    }
+
+    const UINT window_dpi = GetDpiForWindow(window);
+    overlays_.push_back(
+        {.monitor = monitor, .bounds = info.rcMonitor, .window = window, .dpi = window_dpi == 0 ? 96U : window_dpi});
+    return true;
+}
+
+bool OverlayManager::create_ring_window()
+{
+    ring_window_ =
+        CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT, ring_class_name,
+                        nullptr, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance_, nullptr);
+    return ring_window_ != nullptr;
+}
+
+bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::Point cursor,
+                                const std::int32_t radius_px)
+{
+    const overlay::Rect monitor_bounds{
+        .left = monitor_overlay.bounds.left,
+        .top = monitor_overlay.bounds.top,
+        .right = monitor_overlay.bounds.right,
+        .bottom = monitor_overlay.bounds.bottom,
+    };
+    const auto hole = overlay::hole_bounds_in_monitor(cursor, monitor_bounds, radius_px);
+    const auto monitor_width = overlay::width(monitor_bounds);
+    const auto monitor_height = overlay::height(monitor_bounds);
+
+    HRGN full_region = CreateRectRgn(0, 0, monitor_width, monitor_height);
+    HRGN hole_region = CreateEllipticRgn(hole.left, hole.top, hole.right, hole.bottom);
+    if (full_region == nullptr || hole_region == nullptr)
+    {
+        if (full_region != nullptr)
+        {
+            DeleteObject(full_region);
+        }
+        if (hole_region != nullptr)
+        {
+            DeleteObject(hole_region);
+        }
+        return false;
+    }
+
+    const int combine_result = CombineRgn(full_region, full_region, hole_region, RGN_DIFF);
+    DeleteObject(hole_region);
+    if (combine_result == ERROR)
+    {
+        DeleteObject(full_region);
+        return false;
+    }
+
+    if (SetWindowRgn(monitor_overlay.window, full_region, TRUE) == 0)
+    {
+        DeleteObject(full_region);
+        return false;
+    }
+    return true;
+}
+
+bool OverlayManager::ensure_ring_bitmap(const std::int32_t radius_px)
+{
+    if (ring_bitmap_ != nullptr && ring_radius_px_ == radius_px)
+    {
+        return true;
+    }
+
+    destroy_ring_bitmap();
+    const auto margin = (std::max)(1, ring_margin_dip * radius_px / spotlight_radius_dip);
+    const auto stroke = (std::max)(2, ring_stroke_dip * radius_px / spotlight_radius_dip);
+    const auto extent = radius_px + margin;
+    ring_size_ = {.cx = extent * 2, .cy = extent * 2};
+
+    BITMAPINFO bitmap_info{};
+    bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmap_info.bmiHeader.biWidth = ring_size_.cx;
+    bitmap_info.bmiHeader.biHeight = -ring_size_.cy;
+    bitmap_info.bmiHeader.biPlanes = 1;
+    bitmap_info.bmiHeader.biBitCount = 32;
+    bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+    void* pixel_memory = nullptr;
+    ring_bitmap_ = CreateDIBSection(nullptr, &bitmap_info, DIB_RGB_COLORS, &pixel_memory, nullptr, 0);
+    ring_dc_ = CreateCompatibleDC(nullptr);
+    if (ring_bitmap_ == nullptr || ring_dc_ == nullptr || pixel_memory == nullptr)
+    {
+        destroy_ring_bitmap();
+        return false;
+    }
+    ring_old_bitmap_ = SelectObject(ring_dc_, ring_bitmap_);
+
+    auto* pixels = static_cast<std::uint32_t*>(pixel_memory);
+    const auto center = static_cast<double>(extent) - 0.5;
+    const auto half_stroke = static_cast<double>(stroke) / 2.0;
+    for (LONG y = 0; y < ring_size_.cy; ++y)
+    {
+        for (LONG x = 0; x < ring_size_.cx; ++x)
+        {
+            const auto dx = static_cast<double>(x) - center;
+            const auto dy = static_cast<double>(y) - center;
+            const auto distance = std::hypot(dx, dy);
+            const auto coverage = (std::clamp)(half_stroke + 1.0 - std::abs(distance - radius_px), 0.0, 1.0);
+            const auto alpha = static_cast<std::uint8_t>(coverage * 235.0);
+            pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(ring_size_.cx) +
+                   static_cast<std::size_t>(x)] =
+                static_cast<std::uint32_t>(alpha) << 24U | static_cast<std::uint32_t>(alpha) << 16U |
+                static_cast<std::uint32_t>(alpha) << 8U | static_cast<std::uint32_t>(alpha);
+        }
+    }
+
+    ring_radius_px_ = radius_px;
+    return true;
+}
+
+bool OverlayManager::update_ring_position(const overlay::Point cursor) const noexcept
+{
+    if (ring_window_ == nullptr || ring_dc_ == nullptr)
+    {
+        return false;
+    }
+
+    POINT destination{cursor.x - ring_size_.cx / 2, cursor.y - ring_size_.cy / 2};
+    POINT source{};
+    SIZE size = ring_size_;
+    BLENDFUNCTION blend{
+        .BlendOp = AC_SRC_OVER,
+        .BlendFlags = 0,
+        .SourceConstantAlpha = 255,
+        .AlphaFormat = AC_SRC_ALPHA,
+    };
+    if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_dc_, &source, 0, &blend, ULW_ALPHA) ==
+        FALSE)
+    {
+        return false;
+    }
+
+    return SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+}
+
+UINT OverlayManager::dpi_at(const overlay::Point cursor) const noexcept
+{
+    const POINT point{cursor.x, cursor.y};
+    const HMONITOR monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+    for (const auto& overlay : overlays_)
+    {
+        if (overlay.monitor == monitor)
+        {
+            return overlay.dpi;
+        }
+    }
+    return 96;
+}
+
+void OverlayManager::destroy_windows() noexcept
+{
+    if (ring_window_ != nullptr)
+    {
+        DestroyWindow(ring_window_);
+        ring_window_ = nullptr;
+    }
+    for (const auto& overlay : overlays_)
+    {
+        DestroyWindow(overlay.window);
+    }
+    overlays_.clear();
+    visible_ = false;
+}
+
+void OverlayManager::destroy_ring_bitmap() noexcept
+{
+    if (ring_dc_ != nullptr && ring_old_bitmap_ != nullptr)
+    {
+        SelectObject(ring_dc_, ring_old_bitmap_);
+    }
+    if (ring_bitmap_ != nullptr)
+    {
+        DeleteObject(ring_bitmap_);
+    }
+    if (ring_dc_ != nullptr)
+    {
+        DeleteDC(ring_dc_);
+    }
+
+    ring_dc_ = nullptr;
+    ring_bitmap_ = nullptr;
+    ring_old_bitmap_ = nullptr;
+    ring_size_ = {};
+    ring_radius_px_ = 0;
+}
+} // namespace zmouse::platform

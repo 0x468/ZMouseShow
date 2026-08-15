@@ -31,7 +31,11 @@ Generated Visual Studio solutions and projects live under `out/` and are not com
 
 - Accepted requirements and architecture decision record
 - VS 2026 / CMake 4.4 / C++23 project baseline
-- Pure C++ double-Ctrl and mouse-shake detector models
-- Minimal Win32 tray process and Raw Input adapter
+- Strict double-left-Ctrl trigger through Raw Input
+- Optional experimental mouse-shake trigger, disabled by default and available from the tray menu
+- Per-monitor Region overlays with a DPI-aware transparent spotlight and cursor ring
+- Spotlight tracking, input dismissal, idle timeout, maximum duration, and display-change rebuild
 
-The monitor overlay and Region rendering spike are the next implementation milestone. See [the Chinese requirements](docs/需求规格说明书.md) for the full scope.
+Run `ZMouseShow.exe`, then press and release the left Ctrl key twice in quick succession without pressing any other key or mouse button. Right-click the tray icon to pause, enable the experimental shake trigger, or exit.
+
+See [the Chinese requirements](docs/需求规格说明书.md) for the full scope.

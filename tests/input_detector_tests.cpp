@@ -1,6 +1,6 @@
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
-
+#include "zmouse/overlay/geometry.hpp"
 #include <iostream>
 #include <string_view>
 
@@ -111,6 +111,22 @@ void test_mouse_buttons_clear_shake_history()
     check(!detector.process({100, 0, 300}, false), "release starts a fresh movement history");
     check(!detector.process({-100, 0, 350}, false), "pre-drag movement is not retained after release");
 }
+
+void test_overlay_geometry_handles_negative_monitor_coordinates()
+{
+    constexpr zmouse::overlay::Rect left_monitor{
+        .left = -2560,
+        .top = -120,
+        .right = 0,
+        .bottom = 1320,
+    };
+    constexpr zmouse::overlay::Point cursor{-1280, 600};
+    constexpr auto hole = zmouse::overlay::hole_bounds_in_monitor(cursor, left_monitor, 150);
+
+    check(hole.left == 1130 && hole.top == 570 && hole.right == 1430 && hole.bottom == 870,
+          "screen coordinates convert to monitor-local hole bounds");
+    check(zmouse::overlay::dip_to_pixels(120, 120) == 150, "DIP radius scales at 125 percent DPI");
+}
 } // namespace
 
 int main()
@@ -122,6 +138,7 @@ int main()
     test_single_direction_is_not_a_shake();
     test_reversals_trigger_shake();
     test_mouse_buttons_clear_shake_history();
+    test_overlay_geometry_handles_negative_monitor_coordinates();
 
     if (failures == 0)
     {
