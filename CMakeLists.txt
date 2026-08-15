@@ -44,6 +44,7 @@ target_include_directories(zmouse_core SYSTEM
 zmouse_apply_project_options(zmouse_core)
 
 add_executable(ZMouseShow WIN32
+    src/platform/display_simulator.cpp
     src/platform/overlay_manager.cpp
     src/platform/win32_main.cpp
     resources/ZMouseShow.rc

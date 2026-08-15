@@ -1,6 +1,6 @@
 # ZMouseShow
 
-ZMouseShow is a portable Windows mouse locator for multi-monitor and high-DPI desktops. The project is currently in its P0 implementation phase.
+ZMouseShow is a portable Windows mouse locator for multi-monitor and high-DPI desktops. The project is currently in its P1 implementation and hardware-validation phase.
 
 ## Requirements
 
@@ -33,6 +33,8 @@ No configuration file is required. When present, `ZMouseShow.toml` is loaded fro
 
 The tray menu can reload the active configuration or export a documented default TOML file. Export never overwrites an existing file. Changes to the shake trigger and automatic timeout are written back atomically; existing comments and unknown fields are retained. Pause remains a session-only state.
 
+On a single-monitor development machine, launch the built executable with `--simulate-displays` to open an interactive three-monitor preview. It models negative coordinates, vertical offsets, 100%/125%/150% DPI, and a cross-monitor spotlight. This is a visual development aid, not a substitute for real DWM multi-monitor validation.
+
 ## Current state
 
 - Accepted requirements and architecture decision record
@@ -45,6 +47,7 @@ The tray menu can reload the active configuration or export a documented default
 - Spotlight tracking, input dismissal, optional auto-timeout, and display-change rebuild
 - Embedded defaults plus optional portable TOML loading, reloading, atomic preference persistence, and safe default export
 - Privacy-bounded diagnostics export with effective settings and multi-monitor/DPI topology
+- Interactive single-screen preview for a mixed-DPI three-monitor topology
 
 Run `ZMouseShow.exe`, then press and release the configured Ctrl key twice in quick succession without pressing any other key or mouse button. The default remains left Ctrl. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to pause, enable the experimental shake trigger, enable the optional auto-timeout, or exit. Configure `[double_ctrl].side` and the optional `[hotkey]` table in `ZMouseShow.toml`, then reload it from the tray.
 

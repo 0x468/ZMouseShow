@@ -3,6 +3,7 @@
 #include <hidusage.h>
 #include <shellapi.h>
 
+#include "display_simulator.hpp"
 #include "overlay_manager.hpp"
 #include "zmouse/config/settings.hpp"
 #include "zmouse/diagnostics/report.hpp"
@@ -171,6 +172,27 @@ BOOL CALLBACK collect_monitor_diagnostics(const HMONITOR monitor, HDC, LPRECT, c
     {
         return L"ZMouseShow.toml";
     }
+}
+
+[[nodiscard]] bool has_command_line_switch(const wchar_t* expected) noexcept
+{
+    int argument_count = 0;
+    auto* raw_arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
+    if (raw_arguments == nullptr)
+    {
+        return false;
+    }
+    bool found = false;
+    for (int index = 1; index < argument_count; ++index)
+    {
+        if (_wcsicmp(raw_arguments[index], expected) == 0)
+        {
+            found = true;
+            break;
+        }
+    }
+    static_cast<void>(LocalFree(raw_arguments));
+    return found;
 }
 
 class Application final
@@ -984,6 +1006,11 @@ class Application final
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
     static_cast<void>(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
+
+    if (has_command_line_switch(L"--simulate-displays"))
+    {
+        return zmouse::platform::run_display_simulator(instance);
+    }
 
     HANDLE instance_mutex = CreateMutexW(nullptr, TRUE, instance_mutex_name);
     if (instance_mutex == nullptr)
