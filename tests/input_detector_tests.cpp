@@ -112,6 +112,16 @@ void test_mouse_buttons_clear_shake_history()
     check(!detector.process({-100, 0, 350}, false), "pre-drag movement is not retained after release");
 }
 
+void test_active_overlay_blocks_and_clears_shake_history()
+{
+    auto detector = make_test_shake_detector();
+    static_cast<void>(detector.process({100, 0, 100}, false));
+    static_cast<void>(detector.process({-100, 0, 150}, false));
+    static_cast<void>(detector.process({100, 0, 200}, false));
+    check(!detector.process({-100, 0, 250}, true), "an active overlay cannot be retriggered by shaking");
+    check(!detector.process({100, 0, 300}, false), "movement after the overlay starts with fresh history");
+}
+
 void test_overlay_geometry_handles_negative_monitor_coordinates()
 {
     constexpr zmouse::overlay::Rect left_monitor{
@@ -138,6 +148,7 @@ int main()
     test_single_direction_is_not_a_shake();
     test_reversals_trigger_shake();
     test_mouse_buttons_clear_shake_history();
+    test_active_overlay_blocks_and_clears_shake_history();
     test_overlay_geometry_handles_negative_monitor_coordinates();
 
     if (failures == 0)

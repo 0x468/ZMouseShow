@@ -367,6 +367,8 @@ class Application final
         last_cursor_move_at_ = now;
         last_cursor_position_ = position;
         suppress_trigger_ctrl_release_ = suppress_ctrl_release;
+        double_ctrl_detector_.reset();
+        shake_detector_.reset();
         if (auto_timeout_enabled_)
         {
             static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
@@ -381,6 +383,8 @@ class Application final
         }
         static_cast<void>(KillTimer(window_, overlay_timer_id));
         suppress_trigger_ctrl_release_ = false;
+        double_ctrl_detector_.reset();
+        shake_detector_.reset();
     }
 
     void update_overlay_cursor() noexcept
@@ -550,7 +554,8 @@ class Application final
 
         const bool left_control = keyboard.VKey == VK_LCONTROL || (keyboard.VKey == VK_CONTROL && !extended);
 
-        if (overlay_manager_.visible() && !repeated)
+        const bool overlay_was_visible = overlay_manager_.visible();
+        if (overlay_was_visible && !repeated)
         {
             if (left_control && !pressed && suppress_trigger_ctrl_release_)
             {
@@ -572,7 +577,7 @@ class Application final
             }
         }
 
-        if (paused_)
+        if (paused_ || overlay_was_visible)
         {
             return;
         }
@@ -591,12 +596,13 @@ class Application final
 
     void handle_mouse(const RAWMOUSE& mouse) noexcept
     {
+        const bool overlay_was_visible = overlay_manager_.visible();
         const USHORT flags = mouse.usButtonFlags;
         constexpr USHORT button_down_mask = RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN |
                                             RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_BUTTON_4_DOWN |
                                             RI_MOUSE_BUTTON_5_DOWN;
         constexpr USHORT wheel_mask = RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL;
-        if (overlay_manager_.visible() && (flags & (button_down_mask | wheel_mask)) != 0)
+        if (overlay_was_visible && (flags & (button_down_mask | wheel_mask)) != 0)
         {
             dismiss_overlay();
         }
@@ -622,7 +628,7 @@ class Application final
             update_overlay_cursor();
         }
 
-        if (paused_ || !shake_enabled_ || (mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0)
+        if (overlay_was_visible || paused_ || !shake_enabled_ || (mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0)
         {
             return;
         }
@@ -632,7 +638,7 @@ class Application final
             .dy = mouse.lLastY,
             .timestamp = GetTickCount64(),
         };
-        if (shake_detector_.process(movement, overlay_manager_.visible()))
+        if (shake_detector_.process(movement, false))
         {
             static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
         }
