@@ -1,0 +1,46 @@
+# CMake build trees
+/out/
+/build/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# Visual Studio generated files
+/.vs/
+*.sln
+*.suo
+*.user
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+
+# Compiler and linker output
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.ipdb
+*.iobj
+*.tlog
+*.lastbuildstate
+*.exe
+*.dll
+*.lib
+*.exp
+
+# Local runtime configuration and diagnostics
+/ZMouseShow.ini
+/diagnostics/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store

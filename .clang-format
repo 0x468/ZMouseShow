@@ -1,0 +1,21 @@
+BasedOnStyle: Microsoft
+Language: Cpp
+Standard: c++20
+ColumnLimit: 120
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<windows\.h>$'
+    Priority: 1
+  - Regex: '^<(hidusage|shellapi)\.h>$'
+    Priority: 2
+  - Regex: '.*'
+    Priority: 3
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+PointerAlignment: Left
+DerivePointerAlignment: false
