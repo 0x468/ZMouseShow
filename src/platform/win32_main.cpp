@@ -6,9 +6,11 @@
 #include "overlay_manager.hpp"
 #include "zmouse/config/settings.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
+#include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
@@ -315,6 +317,7 @@ class Application final
         overlay_idle_timeout_ms_ = settings.idle_timeout_ms;
         overlay_max_duration_ms_ = settings.maximum_duration_ms;
         double_ctrl_detector_.configure(settings.double_ctrl);
+        hotkey_detector_.configure(settings.hotkey);
         shake_detector_.configure(settings.shake);
         overlay_manager_.configure(settings.spotlight_radius_dip, settings.dim_opacity_percent);
     }
@@ -350,7 +353,7 @@ class Application final
         }
     }
 
-    void activate_overlay(const bool suppress_ctrl_release) noexcept
+    void activate_overlay() noexcept
     {
         if (overlay_manager_.visible())
         {
@@ -378,7 +381,8 @@ class Application final
         overlay_started_at_ = now;
         last_cursor_move_at_ = now;
         last_cursor_position_ = position;
-        suppress_trigger_ctrl_release_ = suppress_ctrl_release;
+        suppressed_key_releases_ = pending_trigger_key_releases_;
+        pending_trigger_key_releases_.reset();
         double_ctrl_detector_.reset();
         shake_detector_.reset();
         schedule_overlay_timer();
@@ -396,7 +400,8 @@ class Application final
         locator_animation_.hide(now);
         const auto frame = locator_animation_.frame(now);
         overlay_manager_.set_animation_frame(frame.dim_progress, frame.ring_scale, frame.ring_opacity);
-        suppress_trigger_ctrl_release_ = false;
+        suppressed_key_releases_.reset();
+        pending_trigger_key_releases_.reset();
         double_ctrl_detector_.reset();
         shake_detector_.reset();
         schedule_overlay_timer();
@@ -407,7 +412,8 @@ class Application final
         overlay_manager_.hide();
         locator_animation_.reset();
         static_cast<void>(KillTimer(window_, overlay_timer_id));
-        suppress_trigger_ctrl_release_ = false;
+        suppressed_key_releases_.reset();
+        pending_trigger_key_releases_.reset();
         double_ctrl_detector_.reset();
         shake_detector_.reset();
     }
@@ -549,7 +555,7 @@ class Application final
             return 0;
 
         case message_activate:
-            activate_overlay(w_param != 0);
+            activate_overlay();
             return 0;
 
         case WM_TIMER:
@@ -623,13 +629,14 @@ class Application final
         key_down_[key_id] = pressed;
 
         const bool left_control = keyboard.VKey == VK_LCONTROL || (keyboard.VKey == VK_CONTROL && !extended);
+        const bool right_control = keyboard.VKey == VK_RCONTROL || (keyboard.VKey == VK_CONTROL && extended);
 
         const bool overlay_was_visible = overlay_manager_.visible();
         if (overlay_was_visible && !repeated)
         {
-            if (left_control && !pressed && suppress_trigger_ctrl_release_)
+            if (!pressed && suppressed_key_releases_.test(key_id))
             {
-                suppress_trigger_ctrl_release_ = false;
+                suppressed_key_releases_.reset(key_id);
             }
             else
             {
@@ -638,12 +645,15 @@ class Application final
         }
 
         bool any_other_key_down = false;
+        bool any_other_non_modifier_key_down = false;
         for (std::size_t index = 0; index < key_down_.size(); ++index)
         {
             if (index != key_id && key_down_[index])
             {
                 any_other_key_down = true;
-                break;
+                const auto virtual_key = static_cast<UINT>(index % 256U);
+                any_other_non_modifier_key_down =
+                    any_other_non_modifier_key_down || !is_modifier_virtual_key(virtual_key);
             }
         }
 
@@ -652,15 +662,64 @@ class Application final
             return;
         }
 
-        const zmouse::input::KeyEvent event{
-            .key = left_control ? zmouse::input::KeyKind::left_control : zmouse::input::KeyKind::other,
+        const zmouse::input::HotkeyEvent hotkey_event{
+            .key = static_cast<std::uint16_t>(keyboard.VKey),
+            .pressed = pressed,
+            .repeated = repeated,
+            .control_down =
+                is_virtual_key_down(VK_CONTROL) || is_virtual_key_down(VK_LCONTROL) || is_virtual_key_down(VK_RCONTROL),
+            .alt_down = is_virtual_key_down(VK_MENU) || is_virtual_key_down(VK_LMENU) || is_virtual_key_down(VK_RMENU),
+            .shift_down =
+                is_virtual_key_down(VK_SHIFT) || is_virtual_key_down(VK_LSHIFT) || is_virtual_key_down(VK_RSHIFT),
+            .windows_down = is_virtual_key_down(VK_LWIN) || is_virtual_key_down(VK_RWIN),
+            .other_key_down = any_other_non_modifier_key_down,
+        };
+        if (hotkey_detector_.process(hotkey_event))
+        {
+            pending_trigger_key_releases_ = key_down_;
+            double_ctrl_detector_.reset();
+            static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
+            return;
+        }
+
+        const zmouse::input::KeyEvent control_event{
+            .key = left_control    ? zmouse::input::KeyKind::left_control
+                   : right_control ? zmouse::input::KeyKind::right_control
+                                   : zmouse::input::KeyKind::other,
             .pressed = pressed,
             .repeated = repeated,
             .timestamp = GetTickCount64(),
         };
-        if (double_ctrl_detector_.process(event, any_other_key_down, mouse_buttons_ != 0))
+        if (double_ctrl_detector_.process(control_event, any_other_key_down, mouse_buttons_ != 0))
         {
-            static_cast<void>(PostMessageW(window_, message_activate, 1, 0));
+            pending_trigger_key_releases_ = key_down_;
+            static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
+        }
+    }
+
+    [[nodiscard]] bool is_virtual_key_down(const UINT virtual_key) const noexcept
+    {
+        return key_down_[virtual_key] || key_down_[virtual_key + 256U];
+    }
+
+    [[nodiscard]] static bool is_modifier_virtual_key(const UINT virtual_key) noexcept
+    {
+        switch (virtual_key)
+        {
+        case VK_CONTROL:
+        case VK_LCONTROL:
+        case VK_RCONTROL:
+        case VK_MENU:
+        case VK_LMENU:
+        case VK_RMENU:
+        case VK_SHIFT:
+        case VK_LSHIFT:
+        case VK_RSHIFT:
+        case VK_LWIN:
+        case VK_RWIN:
+            return true;
+        default:
+            return false;
         }
     }
 
@@ -710,6 +769,7 @@ class Application final
         };
         if (shake_detector_.process(movement, false))
         {
+            pending_trigger_key_releases_.reset();
             static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
         }
     }
@@ -737,8 +797,9 @@ class Application final
     bool paused_{};
     bool shake_enabled_{};
     bool auto_timeout_enabled_{};
-    bool suppress_trigger_ctrl_release_{};
-    std::array<bool, 512> key_down_{};
+    std::bitset<512> key_down_{};
+    std::bitset<512> suppressed_key_releases_{};
+    std::bitset<512> pending_trigger_key_releases_{};
     std::uint8_t mouse_buttons_{};
     ULONGLONG overlay_idle_timeout_ms_{1'200};
     ULONGLONG overlay_max_duration_ms_{5'000};
@@ -746,6 +807,7 @@ class Application final
     ULONGLONG last_cursor_move_at_{};
     zmouse::overlay::Point last_cursor_position_{};
     zmouse::input::DoubleCtrlDetector double_ctrl_detector_{};
+    zmouse::input::HotkeyDetector hotkey_detector_{};
     zmouse::input::ShakeDetector shake_detector_{};
     zmouse::overlay::LocatorAnimation locator_animation_{};
     zmouse::platform::OverlayManager overlay_manager_{};

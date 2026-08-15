@@ -1,4 +1,5 @@
 #include "zmouse/input/double_ctrl_detector.hpp"
+#include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/geometry.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
@@ -65,6 +66,56 @@ void test_repeat_and_timing_do_not_trigger()
     static_cast<void>(detector.process({zmouse::input::KeyKind::left_control, false, false, 1060}, false, false));
     check(!detector.process({zmouse::input::KeyKind::left_control, true, false, 1700}, false, false),
           "a Ctrl press after the maximum interval starts a new candidate");
+}
+
+void test_right_ctrl_and_either_side_configuration()
+{
+    zmouse::input::DoubleCtrlDetector right_detector({.side = zmouse::input::ControlSide::right});
+    check(!right_detector.process({zmouse::input::KeyKind::left_control, true, false, 1'000}, false, false),
+          "left Ctrl is ignored when right Ctrl is configured");
+    check(!right_detector.process({zmouse::input::KeyKind::right_control, true, false, 2'000}, false, false),
+          "first right Ctrl press starts a candidate");
+    static_cast<void>(
+        right_detector.process({zmouse::input::KeyKind::right_control, false, false, 2'050}, false, false));
+    check(right_detector.process({zmouse::input::KeyKind::right_control, true, false, 2'200}, false, false),
+          "double right Ctrl triggers when configured");
+
+    zmouse::input::DoubleCtrlDetector either_detector({.side = zmouse::input::ControlSide::either});
+    static_cast<void>(
+        either_detector.process({zmouse::input::KeyKind::left_control, true, false, 3'000}, false, false));
+    static_cast<void>(
+        either_detector.process({zmouse::input::KeyKind::left_control, false, false, 3'050}, false, false));
+    check(!either_detector.process({zmouse::input::KeyKind::right_control, true, false, 3'200}, false, false),
+          "mixing Ctrl sides does not complete a gesture");
+}
+
+void test_custom_hotkey_requires_an_exact_clean_chord()
+{
+    zmouse::input::HotkeyDetector detector(
+        {.enabled = true, .key = 0x7BU, .control = true, .alt = true, .shift = false, .windows = false});
+    const zmouse::input::HotkeyEvent valid{
+        .key = 0x7BU,
+        .pressed = true,
+        .repeated = false,
+        .control_down = true,
+        .alt_down = true,
+        .shift_down = false,
+        .windows_down = false,
+        .other_key_down = false,
+    };
+    check(detector.process(valid), "the configured Ctrl+Alt+F12 chord triggers");
+
+    auto repeated = valid;
+    repeated.repeated = true;
+    check(!detector.process(repeated), "hotkey auto-repeat is ignored");
+
+    auto extra_modifier = valid;
+    extra_modifier.shift_down = true;
+    check(!detector.process(extra_modifier), "an extra modifier blocks the hotkey");
+
+    auto other_key = valid;
+    other_key.other_key_down = true;
+    check(!detector.process(other_key), "an unrelated held key blocks the hotkey");
 }
 
 zmouse::input::ShakeDetector make_test_shake_detector()
@@ -187,6 +238,8 @@ int main()
     test_ctrl_chords_cancel_candidate();
     test_other_held_key_and_mouse_button_block_ctrl();
     test_repeat_and_timing_do_not_trigger();
+    test_right_ctrl_and_either_side_configuration();
+    test_custom_hotkey_requires_an_exact_clean_chord();
     test_single_direction_is_not_a_shake();
     test_reversals_trigger_shake();
     test_mouse_buttons_clear_shake_history();

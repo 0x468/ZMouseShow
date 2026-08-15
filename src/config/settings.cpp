@@ -31,9 +31,18 @@ idle_ms = 1200
 maximum_duration_ms = 5000
 
 [double_ctrl]
+side = "left"
 minimum_interval_ms = 100
 maximum_interval_ms = 500
 cooldown_ms = 500
+
+[hotkey]
+enabled = false
+key = "F12"
+control = true
+alt = true
+shift = false
+windows = false
 
 [shake]
 interval_ms = 1000
@@ -76,6 +85,45 @@ void assign_double(const toml::table& table, const std::string_view key, double&
     }
 }
 
+[[nodiscard]] char ascii_upper(const char value) noexcept
+{
+    return value >= 'a' && value <= 'z' ? static_cast<char>(value - ('a' - 'A')) : value;
+}
+
+[[nodiscard]] std::optional<std::uint16_t> parse_hotkey_key(const std::string_view value) noexcept
+{
+    if (value.size() == 1)
+    {
+        const char key = ascii_upper(value.front());
+        if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9'))
+        {
+            return static_cast<std::uint16_t>(key);
+        }
+        return std::nullopt;
+    }
+
+    if (value.size() < 2 || ascii_upper(value.front()) != 'F')
+    {
+        return std::nullopt;
+    }
+
+    std::uint16_t function_number = 0;
+    for (const char character : value.substr(1))
+    {
+        if (character < '0' || character > '9')
+        {
+            return std::nullopt;
+        }
+        function_number =
+            static_cast<std::uint16_t>(function_number * 10U + static_cast<std::uint16_t>(character - '0'));
+    }
+    if (function_number < 1 || function_number > 24)
+    {
+        return std::nullopt;
+    }
+    return static_cast<std::uint16_t>(0x70U + function_number - 1U);
+}
+
 void apply_table(const toml::table& document, Settings& settings) noexcept
 {
     if (const auto* general = document["general"].as_table())
@@ -105,6 +153,21 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
     const auto default_double_ctrl = input::DoubleCtrlConfig{};
     if (const auto* double_ctrl = document["double_ctrl"].as_table())
     {
+        if (const auto side = (*double_ctrl)["side"].value<std::string>())
+        {
+            if (*side == "left")
+            {
+                settings.double_ctrl.side = input::ControlSide::left;
+            }
+            else if (*side == "right")
+            {
+                settings.double_ctrl.side = input::ControlSide::right;
+            }
+            else if (*side == "either")
+            {
+                settings.double_ctrl.side = input::ControlSide::either;
+            }
+        }
         assign_integer(*double_ctrl, "minimum_interval_ms", settings.double_ctrl.minimum_interval_ms, 50, 1'000);
         assign_integer(*double_ctrl, "maximum_interval_ms", settings.double_ctrl.maximum_interval_ms, 100, 2'000);
         assign_integer(*double_ctrl, "cooldown_ms", settings.double_ctrl.cooldown_ms, 0, 5'000);
@@ -112,6 +175,37 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
         {
             settings.double_ctrl.minimum_interval_ms = default_double_ctrl.minimum_interval_ms;
             settings.double_ctrl.maximum_interval_ms = default_double_ctrl.maximum_interval_ms;
+        }
+    }
+
+    if (const auto* hotkey = document["hotkey"].as_table())
+    {
+        if (const auto enabled = (*hotkey)["enabled"].value<bool>())
+        {
+            settings.hotkey.enabled = *enabled;
+        }
+        if (const auto key = (*hotkey)["key"].value<std::string>())
+        {
+            if (const auto parsed_key = parse_hotkey_key(*key))
+            {
+                settings.hotkey.key = *parsed_key;
+            }
+        }
+        if (const auto control = (*hotkey)["control"].value<bool>())
+        {
+            settings.hotkey.control = *control;
+        }
+        if (const auto alt = (*hotkey)["alt"].value<bool>())
+        {
+            settings.hotkey.alt = *alt;
+        }
+        if (const auto shift = (*hotkey)["shift"].value<bool>())
+        {
+            settings.hotkey.shift = *shift;
+        }
+        if (const auto windows = (*hotkey)["windows"].value<bool>())
+        {
+            settings.hotkey.windows = *windows;
         }
     }
 

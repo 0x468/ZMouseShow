@@ -72,9 +72,18 @@ idle_ms = 2500
 maximum_duration_ms = 12000
 
 [double_ctrl]
+side = "right"
 minimum_interval_ms = 80
 maximum_interval_ms = 650
 cooldown_ms = 900
+
+[hotkey]
+enabled = true
+key = "F12"
+control = true
+alt = true
+shift = false
+windows = false
 
 [shake]
 interval_ms = 1400
@@ -97,9 +106,13 @@ cooldown_ms = 1100
     check(settings->dim_opacity_percent == 72, "dim opacity is parsed");
     check(settings->idle_timeout_ms == 2500, "idle timeout is parsed");
     check(settings->maximum_duration_ms == 12000, "maximum duration is parsed");
+    check(settings->double_ctrl.side == zmouse::input::ControlSide::right, "Ctrl side is parsed");
     check(settings->double_ctrl.minimum_interval_ms == 80, "minimum Ctrl interval is parsed");
     check(settings->double_ctrl.maximum_interval_ms == 650, "maximum Ctrl interval is parsed");
     check(settings->double_ctrl.cooldown_ms == 900, "Ctrl cooldown is parsed");
+    check(settings->hotkey.enabled && settings->hotkey.key == 0x7B, "custom hotkey is parsed");
+    check(settings->hotkey.control && settings->hotkey.alt && !settings->hotkey.shift && !settings->hotkey.windows,
+          "custom hotkey modifiers are parsed");
     check(settings->shake.interval_ms == 1400, "shake interval is parsed");
     check(std::abs(settings->shake.minimum_distance - 1500.5) < 0.001, "shake distance is parsed");
     check(std::abs(settings->shake.minimum_path_to_diagonal_ratio - 5.5) < 0.001, "shake path ratio is parsed");
@@ -123,8 +136,13 @@ idle_ms = "not-a-number"
 maximum_duration_ms = 9999999
 
 [double_ctrl]
+side = "unsupported"
 minimum_interval_ms = 900
 maximum_interval_ms = 200
+
+[hotkey]
+enabled = true
+key = "Escape"
 
 [shake]
 minimum_distance = nan
@@ -144,6 +162,8 @@ minimum_distance = nan
     check(settings->maximum_duration_ms == 5000, "out-of-range duration uses its default");
     check(settings->double_ctrl.minimum_interval_ms == 100 && settings->double_ctrl.maximum_interval_ms == 500,
           "an inconsistent Ctrl interval pair resets to defaults");
+    check(settings->double_ctrl.side == zmouse::input::ControlSide::left, "an unsupported Ctrl side uses its default");
+    check(settings->hotkey.key == 0x7B, "an unsupported custom hotkey key uses its default");
     check(settings->shake.minimum_distance == 1000.0, "non-finite values use their defaults");
 }
 
@@ -165,6 +185,8 @@ void test_exported_defaults_round_trip()
     check(settings->spotlight_radius_dip == 120 && settings->dim_opacity_percent == 60,
           "exported overlay defaults round-trip");
     check(settings->double_ctrl.maximum_interval_ms == 500, "exported Ctrl defaults round-trip");
+    check(settings->double_ctrl.side == zmouse::input::ControlSide::left, "exported Ctrl side defaults to left");
+    check(!settings->hotkey.enabled && settings->hotkey.key == 0x7B, "exported custom hotkey defaults round-trip");
     check(settings->shake.minimum_reversals == 3, "exported shake defaults round-trip");
 }
 

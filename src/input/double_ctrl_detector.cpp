@@ -14,7 +14,7 @@ void DoubleCtrlDetector::configure(const DoubleCtrlConfig config) noexcept
 
 bool DoubleCtrlDetector::process(const KeyEvent& event, const bool any_other_key_down, const bool any_mouse_button_down)
 {
-    if (event.key != KeyKind::left_control)
+    if (!accepts(event.key))
     {
         cancel_candidate();
         return false;
@@ -42,12 +42,16 @@ bool DoubleCtrlDetector::process(const KeyEvent& event, const bool any_other_key
     case State::idle:
         if (event.pressed)
         {
-            begin_candidate(event.timestamp);
+            begin_candidate(event.timestamp, event.key);
         }
         break;
 
     case State::first_down:
-        if (!event.pressed)
+        if (event.key != candidate_key_)
+        {
+            cancel_candidate();
+        }
+        else if (!event.pressed)
         {
             state_ = State::first_up;
         }
@@ -56,6 +60,11 @@ bool DoubleCtrlDetector::process(const KeyEvent& event, const bool any_other_key
     case State::first_up:
         if (event.pressed)
         {
+            if (event.key != candidate_key_)
+            {
+                begin_candidate(event.timestamp, event.key);
+                break;
+            }
             const auto interval = event.timestamp - first_down_at_;
             if (interval >= config_.minimum_interval_ms && interval <= config_.maximum_interval_ms)
             {
@@ -64,12 +73,12 @@ bool DoubleCtrlDetector::process(const KeyEvent& event, const bool any_other_key
                 return true;
             }
 
-            begin_candidate(event.timestamp);
+            begin_candidate(event.timestamp, event.key);
         }
         break;
 
     case State::triggered_awaiting_release:
-        if (!event.pressed)
+        if (event.key == candidate_key_ && !event.pressed)
         {
             state_ = State::idle;
         }
@@ -89,17 +98,28 @@ void DoubleCtrlDetector::reset() noexcept
     state_ = State::idle;
     first_down_at_ = 0;
     cooldown_until_ = 0;
+    candidate_key_ = KeyKind::other;
 }
 
-void DoubleCtrlDetector::begin_candidate(const TimestampMs timestamp) noexcept
+bool DoubleCtrlDetector::accepts(const KeyKind key) const noexcept
+{
+    return (key == KeyKind::left_control &&
+            (config_.side == ControlSide::left || config_.side == ControlSide::either)) ||
+           (key == KeyKind::right_control &&
+            (config_.side == ControlSide::right || config_.side == ControlSide::either));
+}
+
+void DoubleCtrlDetector::begin_candidate(const TimestampMs timestamp, const KeyKind key) noexcept
 {
     state_ = State::first_down;
     first_down_at_ = timestamp;
+    candidate_key_ = key;
 }
 
 void DoubleCtrlDetector::cancel_candidate() noexcept
 {
     state_ = State::idle;
     first_down_at_ = 0;
+    candidate_key_ = KeyKind::other;
 }
 } // namespace zmouse::input

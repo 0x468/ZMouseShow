@@ -9,7 +9,15 @@ using TimestampMs = std::uint64_t;
 enum class KeyKind
 {
     left_control,
+    right_control,
     other,
+};
+
+enum class ControlSide
+{
+    left,
+    right,
+    either,
 };
 
 struct KeyEvent
@@ -22,6 +30,7 @@ struct KeyEvent
 
 struct DoubleCtrlConfig
 {
+    ControlSide side{ControlSide::left};
     TimestampMs minimum_interval_ms{100};
     TimestampMs maximum_interval_ms{500};
     TimestampMs cooldown_ms{500};
@@ -46,11 +55,13 @@ class DoubleCtrlDetector final
         triggered_awaiting_release,
     };
 
-    void begin_candidate(TimestampMs timestamp) noexcept;
+    [[nodiscard]] bool accepts(KeyKind key) const noexcept;
+    void begin_candidate(TimestampMs timestamp, KeyKind key) noexcept;
     void cancel_candidate() noexcept;
 
     DoubleCtrlConfig config_;
     State state_{State::idle};
+    KeyKind candidate_key_{KeyKind::other};
     TimestampMs first_down_at_{};
     TimestampMs cooldown_until_{};
 };

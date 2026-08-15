@@ -37,14 +37,15 @@ The tray menu can reload the active configuration or export a documented default
 
 - Accepted requirements and architecture decision record
 - VS 2026 / CMake 4.4 / C++23 project baseline
-- Strict double-left-Ctrl trigger through Raw Input
+- Strict double-Ctrl trigger through Raw Input, configurable for left, right, or either side
+- Optional exact custom hotkey (`Ctrl+Alt+F12` by default, disabled until enabled in TOML)
 - Optional experimental mouse-shake trigger, disabled by default and available from the tray menu
 - Per-monitor Region overlays with a DPI-aware transparent spotlight and cursor ring
 - 220 ms fade transitions and a contracting pulse ring driven by a tested animation state machine
 - Spotlight tracking, input dismissal, optional auto-timeout, and display-change rebuild
 - Embedded defaults plus optional portable TOML loading, reloading, atomic preference persistence, and safe default export
 
-Run `ZMouseShow.exe`, then press and release the left Ctrl key twice in quick succession without pressing any other key or mouse button. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to pause, enable the experimental shake trigger, enable the optional auto-timeout, or exit.
+Run `ZMouseShow.exe`, then press and release the configured Ctrl key twice in quick succession without pressing any other key or mouse button. The default remains left Ctrl. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to pause, enable the experimental shake trigger, enable the optional auto-timeout, or exit. Configure `[double_ctrl].side` and the optional `[hotkey]` table in `ZMouseShow.toml`, then reload it from the tray.
 
 See [the Chinese requirements](docs/需求规格说明书.md) for the full scope.
 

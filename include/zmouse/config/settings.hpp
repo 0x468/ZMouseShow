@@ -1,6 +1,7 @@
 #pragma once
 
 #include "zmouse/input/double_ctrl_detector.hpp"
+#include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include <cstdint>
 #include <filesystem>
@@ -20,6 +21,7 @@ struct Settings
     std::uint64_t maximum_duration_ms{5'000};
 
     input::DoubleCtrlConfig double_ctrl{};
+    input::HotkeyConfig hotkey{};
     input::ShakeConfig shake{};
 };
 
