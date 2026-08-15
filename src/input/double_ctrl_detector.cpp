@@ -6,6 +6,12 @@ namespace zmouse::input
 {
 DoubleCtrlDetector::DoubleCtrlDetector(DoubleCtrlConfig config) : config_(std::move(config)) {}
 
+void DoubleCtrlDetector::configure(const DoubleCtrlConfig config) noexcept
+{
+    config_ = config;
+    reset();
+}
+
 bool DoubleCtrlDetector::process(const KeyEvent& event, const bool any_other_key_down, const bool any_mouse_button_down)
 {
     if (event.key != KeyKind::left_control)

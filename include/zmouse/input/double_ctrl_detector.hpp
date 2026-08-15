@@ -32,6 +32,7 @@ class DoubleCtrlDetector final
   public:
     explicit DoubleCtrlDetector(DoubleCtrlConfig config = {});
 
+    void configure(DoubleCtrlConfig config) noexcept;
     [[nodiscard]] bool process(const KeyEvent& event, bool any_other_key_down, bool any_mouse_button_down);
     void on_mouse_button_event() noexcept;
     void reset() noexcept;

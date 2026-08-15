@@ -13,8 +13,6 @@ namespace
 {
 constexpr wchar_t overlay_class_name[] = L"ZMouseShow.MonitorOverlay";
 constexpr wchar_t ring_class_name[] = L"ZMouseShow.CursorRing";
-constexpr BYTE dim_alpha = 153;
-constexpr std::int32_t spotlight_radius_dip = 120;
 constexpr std::int32_t ring_margin_dip = 18;
 constexpr std::int32_t ring_stroke_dip = 5;
 } // namespace
@@ -30,6 +28,29 @@ OverlayManager::~OverlayManager()
     if (overlay_class_ != 0)
     {
         UnregisterClassW(overlay_class_name, instance_);
+    }
+}
+
+void OverlayManager::configure(const std::int32_t spotlight_radius_dip,
+                               const std::uint32_t dim_opacity_percent) noexcept
+{
+    spotlight_radius_dip_ = (std::clamp)(spotlight_radius_dip, 32, 512);
+    const auto opacity = (std::clamp)(dim_opacity_percent, 10U, 90U);
+    dim_alpha_ = static_cast<BYTE>((opacity * 255U + 50U) / 100U);
+    destroy_ring_bitmap();
+
+    for (const auto& overlay : overlays_)
+    {
+        static_cast<void>(SetLayeredWindowAttributes(overlay.window, 0, dim_alpha_, LWA_ALPHA));
+    }
+
+    if (visible_)
+    {
+        POINT cursor{};
+        if (GetCursorPos(&cursor) != FALSE)
+        {
+            move_to({cursor.x, cursor.y});
+        }
     }
 }
 
@@ -64,7 +85,7 @@ bool OverlayManager::rebuild()
 
 bool OverlayManager::show_at(const overlay::Point cursor)
 {
-    const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip, dpi_at(cursor));
+    const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(cursor));
     if (!ensure_ring_bitmap(radius_px))
     {
         return false;
@@ -103,7 +124,7 @@ void OverlayManager::move_to(const overlay::Point cursor)
         return;
     }
 
-    const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip, dpi_at(cursor));
+    const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(cursor));
     if (!ensure_ring_bitmap(radius_px))
     {
         hide();
@@ -224,7 +245,7 @@ bool OverlayManager::create_monitor_overlay(const HMONITOR monitor)
     HWND window = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT,
                                   overlay_class_name, nullptr, WS_POPUP, info.rcMonitor.left, info.rcMonitor.top, width,
                                   height, nullptr, nullptr, instance_, nullptr);
-    if (window == nullptr || SetLayeredWindowAttributes(window, 0, dim_alpha, LWA_ALPHA) == FALSE)
+    if (window == nullptr || SetLayeredWindowAttributes(window, 0, dim_alpha_, LWA_ALPHA) == FALSE)
     {
         if (window != nullptr)
         {
@@ -299,8 +320,8 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t radius_px)
     }
 
     destroy_ring_bitmap();
-    const auto margin = (std::max)(1, ring_margin_dip * radius_px / spotlight_radius_dip);
-    const auto stroke = (std::max)(2, ring_stroke_dip * radius_px / spotlight_radius_dip);
+    const auto margin = (std::max)(1, ring_margin_dip * radius_px / spotlight_radius_dip_);
+    const auto stroke = (std::max)(2, ring_stroke_dip * radius_px / spotlight_radius_dip_);
     const auto extent = radius_px + margin;
     ring_size_ = {.cx = extent * 2, .cy = extent * 2};
 

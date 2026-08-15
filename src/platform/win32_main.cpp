@@ -4,12 +4,17 @@
 #include <shellapi.h>
 
 #include "overlay_manager.hpp"
+#include "zmouse/config/settings.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace
 {
@@ -21,13 +26,13 @@ constexpr UINT tray_icon_id = 1;
 constexpr UINT command_toggle_pause = 1001;
 constexpr UINT command_toggle_shake = 1002;
 constexpr UINT command_toggle_auto_timeout = 1003;
-constexpr UINT command_exit = 1004;
+constexpr UINT command_reload_configuration = 1004;
+constexpr UINT command_export_default_configuration = 1005;
+constexpr UINT command_exit = 1006;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
 constexpr UINT_PTR overlay_timer_id = 1;
 constexpr UINT overlay_timer_interval_ms = 50;
-constexpr ULONGLONG overlay_idle_timeout_ms = 1'200;
-constexpr ULONGLONG overlay_max_duration_ms = 5'000;
 
 constexpr std::uint8_t mouse_left = 1U << 0U;
 constexpr std::uint8_t mouse_right = 1U << 1U;
@@ -35,13 +40,65 @@ constexpr std::uint8_t mouse_middle = 1U << 2U;
 constexpr std::uint8_t mouse_x1 = 1U << 3U;
 constexpr std::uint8_t mouse_x2 = 1U << 4U;
 
+[[nodiscard]] std::filesystem::path resolve_config_path() noexcept
+{
+    try
+    {
+        int argument_count = 0;
+        auto* raw_arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
+        const auto local_free = [](wchar_t** arguments) noexcept
+        {
+            if (arguments != nullptr)
+            {
+                static_cast<void>(LocalFree(arguments));
+            }
+        };
+        const std::unique_ptr<wchar_t*, decltype(local_free)> arguments(raw_arguments, local_free);
+        if (arguments != nullptr)
+        {
+            for (int index = 1; index + 1 < argument_count; ++index)
+            {
+                if (_wcsicmp(arguments.get()[index], L"--config") == 0)
+                {
+                    return std::filesystem::path(arguments.get()[index + 1]);
+                }
+            }
+        }
+
+        std::wstring module_path(32'768, L'\0');
+        const DWORD length = GetModuleFileNameW(nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
+        if (length == 0 || static_cast<std::size_t>(length) >= module_path.size())
+        {
+            return L"ZMouseShow.ini";
+        }
+        module_path.resize(length);
+        return std::filesystem::path(module_path).parent_path() / L"ZMouseShow.ini";
+    }
+    catch (...)
+    {
+        return L"ZMouseShow.ini";
+    }
+}
+
 class Application final
 {
   public:
-    explicit Application(HINSTANCE instance) noexcept : instance_(instance) {}
+    Application(HINSTANCE instance, std::filesystem::path config_path) noexcept
+        : instance_(instance), config_path_(std::move(config_path))
+    {
+    }
 
     int run()
     {
+        if (const auto loaded = zmouse::config::load_ini(config_path_))
+        {
+            apply_settings(*loaded);
+        }
+        else
+        {
+            apply_settings({});
+        }
+
         taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
         if (!create_window() || !overlay_manager_.initialize(instance_) || !register_raw_input() || !add_tray_icon())
         {
@@ -162,6 +219,21 @@ class Application final
         }
     }
 
+    void show_tray_notification(const wchar_t* title, const wchar_t* message, const DWORD flags) noexcept
+    {
+        if (!tray_icon_added_)
+        {
+            return;
+        }
+
+        auto notification = tray_icon_;
+        notification.uFlags = NIF_INFO;
+        notification.dwInfoFlags = flags;
+        wcscpy_s(notification.szInfoTitle, title);
+        wcscpy_s(notification.szInfo, message);
+        static_cast<void>(Shell_NotifyIconW(NIM_MODIFY, &notification));
+    }
+
     void show_tray_menu() noexcept
     {
         HMENU menu = CreatePopupMenu();
@@ -176,6 +248,9 @@ class Application final
         static_cast<void>(AppendMenuW(menu, shake_flags, command_toggle_shake, L"晃动触发（实验）(&S)"));
         const UINT timeout_flags = MF_STRING | (auto_timeout_enabled_ ? MF_CHECKED : MF_UNCHECKED);
         static_cast<void>(AppendMenuW(menu, timeout_flags, command_toggle_auto_timeout, L"自动超时(&T)"));
+        static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
+        static_cast<void>(AppendMenuW(menu, MF_STRING, command_reload_configuration, L"重新加载配置(&R)"));
+        static_cast<void>(AppendMenuW(menu, MF_STRING, command_export_default_configuration, L"导出默认配置(&D)"));
         static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
         static_cast<void>(AppendMenuW(menu, MF_STRING, command_exit, L"退出(&X)"));
 
@@ -198,12 +273,14 @@ class Application final
     void toggle_shake() noexcept
     {
         shake_enabled_ = !shake_enabled_;
+        settings_.shake_enabled = shake_enabled_;
         shake_detector_.reset();
     }
 
     void toggle_auto_timeout() noexcept
     {
         auto_timeout_enabled_ = !auto_timeout_enabled_;
+        settings_.auto_timeout_enabled = auto_timeout_enabled_;
         if (!overlay_manager_.visible())
         {
             return;
@@ -219,6 +296,46 @@ class Application final
         overlay_started_at_ = now;
         last_cursor_move_at_ = now;
         static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
+    }
+
+    void apply_settings(const zmouse::config::Settings& settings) noexcept
+    {
+        if (window_ != nullptr)
+        {
+            dismiss_overlay();
+        }
+
+        settings_ = settings;
+        shake_enabled_ = settings.shake_enabled;
+        auto_timeout_enabled_ = settings.auto_timeout_enabled;
+        overlay_idle_timeout_ms_ = settings.idle_timeout_ms;
+        overlay_max_duration_ms_ = settings.maximum_duration_ms;
+        double_ctrl_detector_.configure(settings.double_ctrl);
+        shake_detector_.configure(settings.shake);
+        overlay_manager_.configure(settings.spotlight_radius_dip, settings.dim_opacity_percent);
+    }
+
+    void reload_configuration() noexcept
+    {
+        const auto loaded = zmouse::config::load_ini(config_path_);
+        if (!loaded)
+        {
+            show_tray_notification(L"ZMouseShow", L"配置重新加载失败，已保留当前设置。", NIIF_WARNING);
+            return;
+        }
+
+        apply_settings(*loaded);
+        show_tray_notification(L"ZMouseShow", L"配置已重新加载。", NIIF_INFO);
+    }
+
+    void export_default_configuration() noexcept
+    {
+        if (zmouse::config::write_default_ini(config_path_))
+        {
+            show_tray_notification(L"ZMouseShow", L"默认配置已导出到程序配置路径。", NIIF_INFO);
+            return;
+        }
+        show_tray_notification(L"ZMouseShow", L"未导出：文件可能已存在或路径不可写。", NIIF_WARNING);
     }
 
     void activate_overlay(const bool suppress_ctrl_release) noexcept
@@ -295,8 +412,8 @@ class Application final
 
         update_overlay_cursor();
         const ULONGLONG now = GetTickCount64();
-        if (now - last_cursor_move_at_ >= overlay_idle_timeout_ms ||
-            now - overlay_started_at_ >= overlay_max_duration_ms)
+        if (now - last_cursor_move_at_ >= overlay_idle_timeout_ms_ ||
+            now - overlay_started_at_ >= overlay_max_duration_ms_)
         {
             dismiss_overlay();
         }
@@ -328,6 +445,12 @@ class Application final
                 return 0;
             case command_toggle_auto_timeout:
                 toggle_auto_timeout();
+                return 0;
+            case command_reload_configuration:
+                reload_configuration();
+                return 0;
+            case command_export_default_configuration:
+                export_default_configuration();
                 return 0;
             case command_exit:
                 DestroyWindow(window_);
@@ -520,6 +643,8 @@ class Application final
 
     HINSTANCE instance_{};
     HWND window_{};
+    std::filesystem::path config_path_;
+    zmouse::config::Settings settings_{};
     UINT taskbar_created_message_{};
     NOTIFYICONDATAW tray_icon_{};
     bool tray_icon_added_{};
@@ -529,6 +654,8 @@ class Application final
     bool suppress_trigger_ctrl_release_{};
     std::array<bool, 512> key_down_{};
     std::uint8_t mouse_buttons_{};
+    ULONGLONG overlay_idle_timeout_ms_{1'200};
+    ULONGLONG overlay_max_duration_ms_{5'000};
     ULONGLONG overlay_started_at_{};
     ULONGLONG last_cursor_move_at_{};
     zmouse::overlay::Point last_cursor_position_{};
@@ -553,7 +680,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
         return 0;
     }
 
-    Application application(instance);
+    Application application(instance, resolve_config_path());
     const int result = application.run();
     static_cast<void>(ReleaseMutex(instance_mutex));
     static_cast<void>(CloseHandle(instance_mutex));

@@ -17,6 +17,12 @@ namespace
 
 ShakeDetector::ShakeDetector(ShakeConfig config) : config_(std::move(config)) {}
 
+void ShakeDetector::configure(const ShakeConfig config) noexcept
+{
+    config_ = config;
+    reset();
+}
+
 bool ShakeDetector::process(const RelativeMovement& movement, const bool overlay_active)
 {
     if (any_mouse_button_down_ || overlay_active)

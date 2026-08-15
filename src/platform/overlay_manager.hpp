@@ -16,6 +16,7 @@ class OverlayManager final
     OverlayManager& operator=(const OverlayManager&) = delete;
     ~OverlayManager();
 
+    void configure(std::int32_t spotlight_radius_dip, std::uint32_t dim_opacity_percent) noexcept;
     [[nodiscard]] bool initialize(HINSTANCE instance);
     [[nodiscard]] bool rebuild();
     [[nodiscard]] bool show_at(overlay::Point cursor);
@@ -57,6 +58,8 @@ class OverlayManager final
     HGDIOBJ ring_old_bitmap_{};
     SIZE ring_size_{};
     std::int32_t ring_radius_px_{};
+    std::int32_t spotlight_radius_dip_{120};
+    BYTE dim_alpha_{153};
     bool visible_{};
 };
 } // namespace zmouse::platform

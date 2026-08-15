@@ -28,6 +28,7 @@ class ShakeDetector final
   public:
     explicit ShakeDetector(ShakeConfig config = {});
 
+    void configure(ShakeConfig config) noexcept;
     [[nodiscard]] bool process(const RelativeMovement& movement, bool overlay_active);
     void on_mouse_buttons_changed(bool any_button_down) noexcept;
     void reset() noexcept;

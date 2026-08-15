@@ -24,6 +24,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProjectOptions)
 
 add_library(zmouse_core STATIC
+    src/config/settings.cpp
     src/input/double_ctrl_detector.cpp
     src/input/shake_detector.cpp
 )
@@ -62,4 +63,11 @@ if(BUILD_TESTING)
     target_link_libraries(zmouse_tests PRIVATE ZMouseShow::Core)
     zmouse_apply_project_options(zmouse_tests)
     add_test(NAME input_detectors COMMAND zmouse_tests)
+
+    add_executable(zmouse_config_tests
+        tests/config_tests.cpp
+    )
+    target_link_libraries(zmouse_config_tests PRIVATE ZMouseShow::Core)
+    zmouse_apply_project_options(zmouse_config_tests)
+    add_test(NAME configuration COMMAND zmouse_config_tests)
 endif()
