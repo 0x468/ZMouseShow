@@ -29,9 +29,9 @@ Generated Visual Studio solutions and projects live under `out/` and are not com
 
 ## Configuration
 
-No configuration file is required. When present, `ZMouseShow.ini` is loaded from the executable directory; an alternate path can be selected with `--config <path>`. Empty, missing, unknown, malformed, and out-of-range fields safely fall back to embedded defaults.
+No configuration file is required. When present, `ZMouseShow.toml` is loaded from the executable directory; an alternate path can be selected with `--config <path>`. Empty and missing files use embedded defaults. Unknown, mistyped, and out-of-range fields are ignored, while a syntactically invalid TOML document is rejected as a whole.
 
-The tray menu can reload the active configuration or export a documented default INI. Export never overwrites an existing file.
+The tray menu can reload the active configuration or export a documented default TOML file. Export never overwrites an existing file. Changes to the shake trigger and automatic timeout are written back atomically; existing comments and unknown fields are retained. Pause remains a session-only state.
 
 ## Current state
 
@@ -41,8 +41,10 @@ The tray menu can reload the active configuration or export a documented default
 - Optional experimental mouse-shake trigger, disabled by default and available from the tray menu
 - Per-monitor Region overlays with a DPI-aware transparent spotlight and cursor ring
 - Spotlight tracking, input dismissal, optional auto-timeout, and display-change rebuild
-- Embedded defaults plus optional portable INI loading, reloading, and safe default export
+- Embedded defaults plus optional portable TOML loading, reloading, atomic preference persistence, and safe default export
 
 Run `ZMouseShow.exe`, then press and release the left Ctrl key twice in quick succession without pressing any other key or mouse button. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to pause, enable the experimental shake trigger, enable the optional auto-timeout, or exit.
 
 See [the Chinese requirements](docs/需求规格说明书.md) for the full scope.
+
+The TOML parser is the vendored single-header distribution of [toml++](https://github.com/marzer/tomlplusplus), so builds remain offline and the executable has no parser DLL dependency.

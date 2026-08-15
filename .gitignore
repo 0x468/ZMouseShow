@@ -34,7 +34,7 @@ Testing/
 *.exp
 
 # Local runtime configuration and diagnostics
-/ZMouseShow.ini
+/ZMouseShow.toml
 /diagnostics/
 
 # Editor and OS files

@@ -2,7 +2,9 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -19,124 +21,202 @@ void check(const bool condition, const std::string_view description)
     }
 }
 
+[[nodiscard]] std::filesystem::path temporary_path(const std::string_view label)
+{
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+           ("ZMouseShow-" + std::string(label) + '-' + std::to_string(suffix) + ".toml");
+}
+
+[[nodiscard]] std::string read_all(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+void remove_test_file(const std::filesystem::path& path)
+{
+    std::error_code error;
+    static_cast<void>(std::filesystem::remove(path, error));
+    check(!error, "the configuration test file is cleaned up");
+}
+
 void test_empty_configuration_uses_defaults()
 {
-    const auto settings = zmouse::config::parse_ini({});
-    check(!settings.shake_enabled, "shake is disabled by default");
-    check(!settings.auto_timeout_enabled, "automatic timeout is disabled by default");
-    check(settings.spotlight_radius_dip == 120, "default spotlight radius is retained");
-    check(settings.dim_opacity_percent == 60, "default dim opacity is retained");
+    const auto settings = zmouse::config::parse_toml({});
+    check(settings.has_value(), "an empty TOML document is valid");
+    if (!settings)
+    {
+        return;
+    }
+
+    check(!settings->shake_enabled, "shake is disabled by default");
+    check(!settings->auto_timeout_enabled, "automatic timeout is disabled by default");
+    check(settings->spotlight_radius_dip == 120, "default spotlight radius is retained");
+    check(settings->dim_opacity_percent == 60, "default dim opacity is retained");
 }
 
 void test_valid_values_override_defaults()
 {
-    constexpr std::string_view ini = R"ini(
-[GENERAL]
-shake_enabled=yes
-auto_timeout_enabled=on
+    constexpr std::string_view toml = R"toml(
+[general]
+shake_enabled = true
+auto_timeout_enabled = true
 
 [overlay]
-radius_dip=180
-dim_opacity_percent=72
+radius_dip = 180
+dim_opacity_percent = 72
 
 [timeout]
-idle_ms=2500
-maximum_duration_ms=12000
+idle_ms = 2500
+maximum_duration_ms = 12000
 
 [double_ctrl]
-minimum_interval_ms=80
-maximum_interval_ms=650
-cooldown_ms=900
+minimum_interval_ms = 80
+maximum_interval_ms = 650
+cooldown_ms = 900
 
 [shake]
-interval_ms=1400
-minimum_distance=1500.5
-minimum_path_to_diagonal_ratio=5.5
-minimum_reversals=5
-cooldown_ms=1100
-)ini";
+interval_ms = 1400
+minimum_distance = 1500.5
+minimum_path_to_diagonal_ratio = 5.5
+minimum_reversals = 5
+cooldown_ms = 1100
+)toml";
 
-    const auto settings = zmouse::config::parse_ini(ini);
-    check(settings.shake_enabled, "boolean yes is accepted");
-    check(settings.auto_timeout_enabled, "boolean on is accepted");
-    check(settings.spotlight_radius_dip == 180, "spotlight radius is parsed");
-    check(settings.dim_opacity_percent == 72, "dim opacity is parsed");
-    check(settings.idle_timeout_ms == 2500, "idle timeout is parsed");
-    check(settings.maximum_duration_ms == 12000, "maximum duration is parsed");
-    check(settings.double_ctrl.minimum_interval_ms == 80, "minimum Ctrl interval is parsed");
-    check(settings.double_ctrl.maximum_interval_ms == 650, "maximum Ctrl interval is parsed");
-    check(settings.double_ctrl.cooldown_ms == 900, "Ctrl cooldown is parsed");
-    check(settings.shake.interval_ms == 1400, "shake interval is parsed");
-    check(std::abs(settings.shake.minimum_distance - 1500.5) < 0.001, "shake distance is parsed");
-    check(std::abs(settings.shake.minimum_path_to_diagonal_ratio - 5.5) < 0.001, "shake path ratio is parsed");
-    check(settings.shake.minimum_reversals == 5, "shake reversal count is parsed");
-    check(settings.shake.cooldown_ms == 1100, "shake cooldown is parsed");
+    const auto settings = zmouse::config::parse_toml(toml);
+    check(settings.has_value(), "valid TOML is accepted");
+    if (!settings)
+    {
+        return;
+    }
+
+    check(settings->shake_enabled, "shake setting is parsed");
+    check(settings->auto_timeout_enabled, "timeout setting is parsed");
+    check(settings->spotlight_radius_dip == 180, "spotlight radius is parsed");
+    check(settings->dim_opacity_percent == 72, "dim opacity is parsed");
+    check(settings->idle_timeout_ms == 2500, "idle timeout is parsed");
+    check(settings->maximum_duration_ms == 12000, "maximum duration is parsed");
+    check(settings->double_ctrl.minimum_interval_ms == 80, "minimum Ctrl interval is parsed");
+    check(settings->double_ctrl.maximum_interval_ms == 650, "maximum Ctrl interval is parsed");
+    check(settings->double_ctrl.cooldown_ms == 900, "Ctrl cooldown is parsed");
+    check(settings->shake.interval_ms == 1400, "shake interval is parsed");
+    check(std::abs(settings->shake.minimum_distance - 1500.5) < 0.001, "shake distance is parsed");
+    check(std::abs(settings->shake.minimum_path_to_diagonal_ratio - 5.5) < 0.001, "shake path ratio is parsed");
+    check(settings->shake.minimum_reversals == 5, "shake reversal count is parsed");
+    check(settings->shake.cooldown_ms == 1100, "shake cooldown is parsed");
 }
 
 void test_invalid_values_are_ignored()
 {
-    constexpr std::string_view ini = "\xEF\xBB\xBF"
-                                     R"ini([general]
-shake_enabled=maybe
-unknown_key=42
+    constexpr std::string_view toml = R"toml(
+[general]
+shake_enabled = "maybe"
+unknown_key = 42
 
 [overlay]
-radius_dip=4096
-dim_opacity_percent=-1
+radius_dip = 4096
+dim_opacity_percent = -1
 
 [timeout]
-idle_ms=not-a-number
-maximum_duration_ms=9999999
+idle_ms = "not-a-number"
+maximum_duration_ms = 9999999
 
 [double_ctrl]
-minimum_interval_ms=900
-maximum_interval_ms=200
+minimum_interval_ms = 900
+maximum_interval_ms = 200
 
 [shake]
-minimum_distance=nan
-)ini";
+minimum_distance = nan
+)toml";
 
-    const auto settings = zmouse::config::parse_ini(ini);
-    check(!settings.shake_enabled, "invalid boolean uses its default");
-    check(settings.spotlight_radius_dip == 120, "out-of-range radius uses its default");
-    check(settings.dim_opacity_percent == 60, "out-of-range opacity uses its default");
-    check(settings.idle_timeout_ms == 1200, "invalid timeout uses its default");
-    check(settings.maximum_duration_ms == 5000, "out-of-range duration uses its default");
-    check(settings.double_ctrl.minimum_interval_ms == 100 && settings.double_ctrl.maximum_interval_ms == 500,
+    const auto settings = zmouse::config::parse_toml(toml);
+    check(settings.has_value(), "valid TOML with unusable fields is accepted");
+    if (!settings)
+    {
+        return;
+    }
+
+    check(!settings->shake_enabled, "a wrong-type boolean uses its default");
+    check(settings->spotlight_radius_dip == 120, "out-of-range radius uses its default");
+    check(settings->dim_opacity_percent == 60, "out-of-range opacity uses its default");
+    check(settings->idle_timeout_ms == 1200, "a wrong-type timeout uses its default");
+    check(settings->maximum_duration_ms == 5000, "out-of-range duration uses its default");
+    check(settings->double_ctrl.minimum_interval_ms == 100 && settings->double_ctrl.maximum_interval_ms == 500,
           "an inconsistent Ctrl interval pair resets to defaults");
-    check(settings.shake.minimum_distance == 1000.0, "non-finite floating-point values use their defaults");
+    check(settings->shake.minimum_distance == 1000.0, "non-finite values use their defaults");
+}
+
+void test_invalid_syntax_is_rejected()
+{
+    check(!zmouse::config::parse_toml("[general\nshake_enabled = true"), "syntactically invalid TOML is rejected");
 }
 
 void test_exported_defaults_round_trip()
 {
-    const auto settings = zmouse::config::parse_ini(zmouse::config::default_ini_text());
-    check(!settings.shake_enabled && !settings.auto_timeout_enabled, "exported defaults keep optional triggers off");
-    check(settings.spotlight_radius_dip == 120 && settings.dim_opacity_percent == 60,
+    const auto settings = zmouse::config::parse_toml(zmouse::config::default_toml_text());
+    check(settings.has_value(), "the exported defaults are valid TOML");
+    if (!settings)
+    {
+        return;
+    }
+
+    check(!settings->shake_enabled && !settings->auto_timeout_enabled, "exported defaults keep optional triggers off");
+    check(settings->spotlight_radius_dip == 120 && settings->dim_opacity_percent == 60,
           "exported overlay defaults round-trip");
-    check(settings.double_ctrl.maximum_interval_ms == 500, "exported Ctrl defaults round-trip");
-    check(settings.shake.minimum_reversals == 3, "exported shake defaults round-trip");
+    check(settings->double_ctrl.maximum_interval_ms == 500, "exported Ctrl defaults round-trip");
+    check(settings->shake.minimum_reversals == 3, "exported shake defaults round-trip");
 }
 
 void test_file_export_load_and_no_overwrite()
 {
-    const auto unique_suffix = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto path =
-        std::filesystem::temp_directory_path() / ("ZMouseShow-config-test-" + std::to_string(unique_suffix) + ".ini");
-
-    const bool exported = zmouse::config::write_default_ini(path);
+    const auto path = temporary_path("export-test");
+    const bool exported = zmouse::config::write_default_toml(path);
     check(exported, "default configuration can be exported to a new file");
     if (!exported)
     {
         return;
     }
 
-    const auto loaded = zmouse::config::load_ini(path);
-    check(loaded.has_value(), "an exported configuration can be loaded");
-    check(!zmouse::config::write_default_ini(path), "export never overwrites an existing configuration");
+    check(zmouse::config::load_toml(path).has_value(), "an exported configuration can be loaded");
+    check(!zmouse::config::write_default_toml(path), "export never overwrites an existing configuration");
+    remove_test_file(path);
+}
 
-    std::error_code error;
-    static_cast<void>(std::filesystem::remove(path, error));
-    check(!error, "the configuration test file is cleaned up");
+void test_preferences_are_persisted_without_losing_comments()
+{
+    const auto path = temporary_path("persistence-test");
+    {
+        std::ofstream stream(path, std::ios::binary);
+        stream << R"toml(# keep this comment
+[general]
+shake_enabled = false # keep this inline comment
+
+[custom]
+answer = 42
+)toml";
+    }
+
+    check(zmouse::config::persist_runtime_preferences(path, true, true), "runtime preferences can be persisted");
+    const auto contents = read_all(path);
+    check(contents.find("# keep this comment") != std::string::npos, "leading comments are preserved");
+    check(contents.find("# keep this inline comment") != std::string::npos, "inline comments are preserved");
+    check(contents.find("[custom]\nanswer = 42") != std::string::npos, "unknown tables are preserved");
+
+    const auto loaded = zmouse::config::load_toml(path);
+    check(loaded && loaded->shake_enabled && loaded->auto_timeout_enabled, "persisted preferences can be loaded");
+    remove_test_file(path);
+}
+
+void test_preferences_create_a_missing_configuration()
+{
+    const auto path = temporary_path("create-test");
+    check(zmouse::config::persist_runtime_preferences(path, true, false),
+          "persisting preferences creates a missing configuration");
+    const auto loaded = zmouse::config::load_toml(path);
+    check(loaded && loaded->shake_enabled && !loaded->auto_timeout_enabled,
+          "newly created configuration contains the requested preferences");
+    remove_test_file(path);
 }
 } // namespace
 
@@ -145,8 +225,11 @@ int main()
     test_empty_configuration_uses_defaults();
     test_valid_values_override_defaults();
     test_invalid_values_are_ignored();
+    test_invalid_syntax_is_rejected();
     test_exported_defaults_round_trip();
     test_file_export_load_and_no_overwrite();
+    test_preferences_are_persisted_without_losing_comments();
+    test_preferences_create_a_missing_configuration();
 
     if (failures == 0)
     {

@@ -14,7 +14,7 @@ ZMouseShow 需要在受限企业电脑上以免安装、无管理员权限的单
 3. 使用每显示器 Overlay 窗口，不使用一个虚拟桌面大小的 CPU 位图。
 4. P0 先验证 Window Region 真圆孔与小型分层位图组合方案。
 5. 如果 Region 方案的动画或兼容性不合格，保持 Overlay 管理接口并切换为 Direct2D + DirectComposition。
-6. P0 使用内置默认配置和可选 INI，不实现设置面板。
+6. P0 使用内置默认配置和可选 TOML，不实现设置面板；采用 vendored toml++ 单头文件解析，托盘长期偏好以保留注释的原子写回持久化。
 7. 不修改系统光标；放大效果通过 Overlay 绘制当前光标副本实现。
 
 ## 结果

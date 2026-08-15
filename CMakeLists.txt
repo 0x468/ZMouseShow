@@ -34,6 +34,10 @@ target_include_directories(zmouse_core
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
 )
+target_include_directories(zmouse_core SYSTEM
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tomlplusplus"
+)
 zmouse_apply_project_options(zmouse_core)
 
 add_executable(ZMouseShow WIN32

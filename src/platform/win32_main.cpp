@@ -69,14 +69,14 @@ constexpr std::uint8_t mouse_x2 = 1U << 4U;
         const DWORD length = GetModuleFileNameW(nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
         if (length == 0 || static_cast<std::size_t>(length) >= module_path.size())
         {
-            return L"ZMouseShow.ini";
+            return L"ZMouseShow.toml";
         }
         module_path.resize(length);
-        return std::filesystem::path(module_path).parent_path() / L"ZMouseShow.ini";
+        return std::filesystem::path(module_path).parent_path() / L"ZMouseShow.toml";
     }
     catch (...)
     {
-        return L"ZMouseShow.ini";
+        return L"ZMouseShow.toml";
     }
 }
 
@@ -90,7 +90,7 @@ class Application final
 
     int run()
     {
-        if (const auto loaded = zmouse::config::load_ini(config_path_))
+        if (const auto loaded = zmouse::config::load_toml(config_path_))
         {
             apply_settings(*loaded);
         }
@@ -275,12 +275,14 @@ class Application final
         shake_enabled_ = !shake_enabled_;
         settings_.shake_enabled = shake_enabled_;
         shake_detector_.reset();
+        persist_preferences();
     }
 
     void toggle_auto_timeout() noexcept
     {
         auto_timeout_enabled_ = !auto_timeout_enabled_;
         settings_.auto_timeout_enabled = auto_timeout_enabled_;
+        persist_preferences();
         if (!overlay_manager_.visible())
         {
             return;
@@ -317,7 +319,7 @@ class Application final
 
     void reload_configuration() noexcept
     {
-        const auto loaded = zmouse::config::load_ini(config_path_);
+        const auto loaded = zmouse::config::load_toml(config_path_);
         if (!loaded)
         {
             show_tray_notification(L"ZMouseShow", L"配置重新加载失败，已保留当前设置。", NIIF_WARNING);
@@ -330,12 +332,20 @@ class Application final
 
     void export_default_configuration() noexcept
     {
-        if (zmouse::config::write_default_ini(config_path_))
+        if (zmouse::config::write_default_toml(config_path_))
         {
-            show_tray_notification(L"ZMouseShow", L"默认配置已导出到程序配置路径。", NIIF_INFO);
+            show_tray_notification(L"ZMouseShow", L"默认 TOML 配置已导出到程序配置路径。", NIIF_INFO);
             return;
         }
         show_tray_notification(L"ZMouseShow", L"未导出：文件可能已存在或路径不可写。", NIIF_WARNING);
+    }
+
+    void persist_preferences() noexcept
+    {
+        if (!zmouse::config::persist_runtime_preferences(config_path_, shake_enabled_, auto_timeout_enabled_))
+        {
+            show_tray_notification(L"ZMouseShow", L"设置已生效，但无法保存到 TOML 配置。", NIIF_WARNING);
+        }
     }
 
     void activate_overlay(const bool suppress_ctrl_release) noexcept

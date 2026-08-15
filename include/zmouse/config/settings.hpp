@@ -23,8 +23,10 @@ struct Settings
     input::ShakeConfig shake{};
 };
 
-[[nodiscard]] Settings parse_ini(std::string_view text) noexcept;
-[[nodiscard]] std::optional<Settings> load_ini(const std::filesystem::path& path) noexcept;
-[[nodiscard]] bool write_default_ini(const std::filesystem::path& path) noexcept;
-[[nodiscard]] std::string_view default_ini_text() noexcept;
+[[nodiscard]] std::optional<Settings> parse_toml(std::string_view text) noexcept;
+[[nodiscard]] std::optional<Settings> load_toml(const std::filesystem::path& path) noexcept;
+[[nodiscard]] bool write_default_toml(const std::filesystem::path& path) noexcept;
+[[nodiscard]] bool persist_runtime_preferences(const std::filesystem::path& path, bool shake_enabled,
+                                               bool auto_timeout_enabled) noexcept;
+[[nodiscard]] std::string_view default_toml_text() noexcept;
 } // namespace zmouse::config
