@@ -15,6 +15,7 @@ constexpr wchar_t overlay_class_name[] = L"ZMouseShow.MonitorOverlay";
 constexpr wchar_t ring_class_name[] = L"ZMouseShow.CursorRing";
 constexpr std::int32_t ring_margin_dip = 18;
 constexpr std::int32_t ring_stroke_dip = 5;
+constexpr std::int32_t maximum_animated_ring_radius_px = 768;
 } // namespace
 
 OverlayManager::~OverlayManager()
@@ -39,10 +40,7 @@ void OverlayManager::configure(const std::int32_t spotlight_radius_dip,
     dim_alpha_ = static_cast<BYTE>((opacity * 255U + 50U) / 100U);
     destroy_ring_bitmap();
 
-    for (const auto& overlay : overlays_)
-    {
-        static_cast<void>(SetLayeredWindowAttributes(overlay.window, 0, dim_alpha_, LWA_ALPHA));
-    }
+    apply_dim_progress();
 
     if (visible_)
     {
@@ -86,11 +84,12 @@ bool OverlayManager::rebuild()
 bool OverlayManager::show_at(const overlay::Point cursor)
 {
     const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(cursor));
-    if (!ensure_ring_bitmap(radius_px))
+    if (!ensure_ring_bitmap(radius_px, ring_scale_))
     {
         return false;
     }
 
+    apply_dim_progress();
     for (auto& monitor_overlay : overlays_)
     {
         if (!apply_hole(monitor_overlay, cursor, radius_px))
@@ -113,6 +112,7 @@ bool OverlayManager::show_at(const overlay::Point cursor)
         return false;
     }
 
+    last_cursor_ = cursor;
     visible_ = true;
     return true;
 }
@@ -125,7 +125,7 @@ void OverlayManager::move_to(const overlay::Point cursor)
     }
 
     const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(cursor));
-    if (!ensure_ring_bitmap(radius_px))
+    if (!ensure_ring_bitmap(radius_px, ring_scale_))
     {
         hide();
         return;
@@ -140,7 +140,27 @@ void OverlayManager::move_to(const overlay::Point cursor)
         }
     }
 
+    last_cursor_ = cursor;
     if (!update_ring_position(cursor))
+    {
+        hide();
+    }
+}
+
+void OverlayManager::set_animation_frame(const double dim_progress, const double ring_scale, const double ring_opacity)
+{
+    dim_progress_ = (std::clamp)(dim_progress, 0.0, 1.0);
+    ring_scale_ = (std::clamp)(ring_scale, 1.0, 4.0);
+    ring_opacity_ = (std::clamp)(ring_opacity, 0.0, 1.0);
+    apply_dim_progress();
+
+    if (!visible_)
+    {
+        return;
+    }
+
+    const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(last_cursor_));
+    if (!ensure_ring_bitmap(radius_px, ring_scale_) || !update_ring_position(last_cursor_))
     {
         hide();
     }
@@ -312,17 +332,21 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
     return true;
 }
 
-bool OverlayManager::ensure_ring_bitmap(const std::int32_t radius_px)
+bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const double scale)
 {
-    if (ring_bitmap_ != nullptr && ring_radius_px_ == radius_px)
+    const auto requested_radius =
+        static_cast<std::int32_t>(std::lround(static_cast<double>(base_radius_px) * (std::clamp)(scale, 1.0, 4.0)));
+    const auto visual_radius =
+        (std::clamp)(requested_radius, base_radius_px, (std::max)(base_radius_px, maximum_animated_ring_radius_px));
+    if (ring_bitmap_ != nullptr && ring_base_radius_px_ == base_radius_px && ring_visual_radius_px_ == visual_radius)
     {
         return true;
     }
 
     destroy_ring_bitmap();
-    const auto margin = (std::max)(1, ring_margin_dip * radius_px / spotlight_radius_dip_);
-    const auto stroke = (std::max)(2, ring_stroke_dip * radius_px / spotlight_radius_dip_);
-    const auto extent = radius_px + margin;
+    const auto margin = (std::max)(1, ring_margin_dip * base_radius_px / spotlight_radius_dip_);
+    const auto stroke = (std::max)(2, ring_stroke_dip * base_radius_px / spotlight_radius_dip_);
+    const auto extent = visual_radius + margin;
     ring_size_ = {.cx = extent * 2, .cy = extent * 2};
 
     BITMAPINFO bitmap_info{};
@@ -353,7 +377,7 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t radius_px)
             const auto dx = static_cast<double>(x) - center;
             const auto dy = static_cast<double>(y) - center;
             const auto distance = std::hypot(dx, dy);
-            const auto coverage = (std::clamp)(half_stroke + 1.0 - std::abs(distance - radius_px), 0.0, 1.0);
+            const auto coverage = (std::clamp)(half_stroke + 1.0 - std::abs(distance - visual_radius), 0.0, 1.0);
             const auto alpha = static_cast<std::uint8_t>(coverage * 235.0);
             pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(ring_size_.cx) +
                    static_cast<std::size_t>(x)] =
@@ -362,7 +386,8 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t radius_px)
         }
     }
 
-    ring_radius_px_ = radius_px;
+    ring_base_radius_px_ = base_radius_px;
+    ring_visual_radius_px_ = visual_radius;
     return true;
 }
 
@@ -379,7 +404,7 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) const noe
     BLENDFUNCTION blend{
         .BlendOp = AC_SRC_OVER,
         .BlendFlags = 0,
-        .SourceConstantAlpha = 255,
+        .SourceConstantAlpha = static_cast<BYTE>(std::lround(ring_opacity_ * 255.0)),
         .AlphaFormat = AC_SRC_ALPHA,
     };
     if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_dc_, &source, 0, &blend, ULW_ALPHA) ==
@@ -404,6 +429,15 @@ UINT OverlayManager::dpi_at(const overlay::Point cursor) const noexcept
         }
     }
     return 96;
+}
+
+void OverlayManager::apply_dim_progress() const noexcept
+{
+    const auto alpha = static_cast<BYTE>(std::lround(static_cast<double>(dim_alpha_) * dim_progress_));
+    for (const auto& overlay : overlays_)
+    {
+        static_cast<void>(SetLayeredWindowAttributes(overlay.window, 0, alpha, LWA_ALPHA));
+    }
 }
 
 void OverlayManager::destroy_windows() noexcept
@@ -440,6 +474,7 @@ void OverlayManager::destroy_ring_bitmap() noexcept
     ring_bitmap_ = nullptr;
     ring_old_bitmap_ = nullptr;
     ring_size_ = {};
-    ring_radius_px_ = 0;
+    ring_base_radius_px_ = 0;
+    ring_visual_radius_px_ = 0;
 }
 } // namespace zmouse::platform

@@ -40,6 +40,7 @@ The tray menu can reload the active configuration or export a documented default
 - Strict double-left-Ctrl trigger through Raw Input
 - Optional experimental mouse-shake trigger, disabled by default and available from the tray menu
 - Per-monitor Region overlays with a DPI-aware transparent spotlight and cursor ring
+- 220 ms fade transitions and a contracting pulse ring driven by a tested animation state machine
 - Spotlight tracking, input dismissal, optional auto-timeout, and display-change rebuild
 - Embedded defaults plus optional portable TOML loading, reloading, atomic preference persistence, and safe default export
 

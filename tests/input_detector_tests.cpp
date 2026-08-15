@@ -1,6 +1,8 @@
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/geometry.hpp"
+#include "zmouse/overlay/locator_animation.hpp"
+#include <cmath>
 #include <iostream>
 #include <string_view>
 
@@ -122,6 +124,46 @@ void test_active_overlay_blocks_and_clears_shake_history()
     check(!detector.process({100, 0, 300}, false), "movement after the overlay starts with fresh history");
 }
 
+void test_locator_animation_transitions()
+{
+    zmouse::overlay::LocatorAnimation animation;
+    check(animation.phase() == zmouse::overlay::AnimationPhase::hidden, "animation starts hidden");
+
+    animation.show(1'000);
+    const auto first = animation.frame(1'000);
+    check(first.surface_visible && first.needs_more_frames, "show starts an active transition");
+    check(first.dim_progress == 0.0 && first.ring_scale == 4.0, "show starts transparent with a large ring");
+
+    const auto middle = animation.frame(1'110);
+    check(middle.dim_progress > 0.0 && middle.dim_progress < 1.0, "fade-in progresses over time");
+    check(middle.ring_scale > 1.0 && middle.ring_scale < 4.0, "the pulse ring contracts over time");
+
+    const auto shown = animation.frame(1'220);
+    check(shown.surface_visible && !shown.needs_more_frames, "fade-in reaches a stable visible state");
+    check(shown.dim_progress == 1.0 && shown.ring_scale == 1.0, "stable frame reaches final opacity and scale");
+
+    animation.hide(2'000);
+    const auto fading = animation.frame(2'110);
+    check(fading.surface_visible && fading.needs_more_frames, "hide starts a fade-out transition");
+    check(fading.dim_progress > 0.0 && fading.dim_progress < 1.0, "fade-out reduces dim opacity");
+
+    const auto hidden = animation.frame(2'220);
+    check(!hidden.surface_visible && !hidden.needs_more_frames, "fade-out finishes hidden");
+    check(animation.phase() == zmouse::overlay::AnimationPhase::hidden, "finished fade-out resets the state");
+}
+
+void test_locator_animation_can_reverse_during_fade_in()
+{
+    zmouse::overlay::LocatorAnimation animation;
+    animation.show(100);
+    const double partial_opacity = animation.frame(150).dim_progress;
+    animation.hide(150);
+    const auto first_fade_frame = animation.frame(150);
+    check(std::abs(first_fade_frame.dim_progress - partial_opacity) < 0.001,
+          "fade-out continues from the current fade-in opacity");
+    check(!animation.frame(370).surface_visible, "an interrupted fade-in still finishes hidden");
+}
+
 void test_overlay_geometry_handles_negative_monitor_coordinates()
 {
     constexpr zmouse::overlay::Rect left_monitor{
@@ -149,6 +191,8 @@ int main()
     test_reversals_trigger_shake();
     test_mouse_buttons_clear_shake_history();
     test_active_overlay_blocks_and_clears_shake_history();
+    test_locator_animation_transitions();
+    test_locator_animation_can_reverse_during_fade_in();
     test_overlay_geometry_handles_negative_monitor_coordinates();
 
     if (failures == 0)

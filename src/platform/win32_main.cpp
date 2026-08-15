@@ -7,6 +7,7 @@
 #include "zmouse/config/settings.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
+#include "zmouse/overlay/locator_animation.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +33,8 @@ constexpr UINT command_exit = 1006;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
 constexpr UINT_PTR overlay_timer_id = 1;
-constexpr UINT overlay_timer_interval_ms = 50;
+constexpr UINT animation_timer_interval_ms = 16;
+constexpr UINT timeout_timer_interval_ms = 50;
 
 constexpr std::uint8_t mouse_left = 1U << 0U;
 constexpr std::uint8_t mouse_right = 1U << 1U;
@@ -290,21 +292,21 @@ class Application final
 
         if (!auto_timeout_enabled_)
         {
-            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            schedule_overlay_timer();
             return;
         }
 
         const ULONGLONG now = GetTickCount64();
         overlay_started_at_ = now;
         last_cursor_move_at_ = now;
-        static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
+        schedule_overlay_timer();
     }
 
     void apply_settings(const zmouse::config::Settings& settings) noexcept
     {
         if (window_ != nullptr)
         {
-            dismiss_overlay();
+            hide_overlay_immediately();
         }
 
         settings_ = settings;
@@ -350,6 +352,11 @@ class Application final
 
     void activate_overlay(const bool suppress_ctrl_release) noexcept
     {
+        if (overlay_manager_.visible())
+        {
+            return;
+        }
+
         POINT cursor{};
         if (GetCursorPos(&cursor) == FALSE)
         {
@@ -357,34 +364,73 @@ class Application final
         }
 
         const zmouse::overlay::Point position{cursor.x, cursor.y};
+        const ULONGLONG now = GetTickCount64();
+        locator_animation_.show(now);
+        const auto initial_frame = locator_animation_.frame(now);
+        overlay_manager_.set_animation_frame(initial_frame.dim_progress, initial_frame.ring_scale,
+                                             initial_frame.ring_opacity);
         if (!overlay_manager_.show_at(position))
         {
+            locator_animation_.reset();
             return;
         }
 
-        const ULONGLONG now = GetTickCount64();
         overlay_started_at_ = now;
         last_cursor_move_at_ = now;
         last_cursor_position_ = position;
         suppress_trigger_ctrl_release_ = suppress_ctrl_release;
         double_ctrl_detector_.reset();
         shake_detector_.reset();
-        if (auto_timeout_enabled_)
-        {
-            static_cast<void>(SetTimer(window_, overlay_timer_id, overlay_timer_interval_ms, nullptr));
-        }
+        schedule_overlay_timer();
     }
 
     void dismiss_overlay() noexcept
     {
-        if (overlay_manager_.visible())
+        if (!overlay_manager_.visible())
         {
-            overlay_manager_.hide();
+            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            return;
         }
+
+        const ULONGLONG now = GetTickCount64();
+        locator_animation_.hide(now);
+        const auto frame = locator_animation_.frame(now);
+        overlay_manager_.set_animation_frame(frame.dim_progress, frame.ring_scale, frame.ring_opacity);
+        suppress_trigger_ctrl_release_ = false;
+        double_ctrl_detector_.reset();
+        shake_detector_.reset();
+        schedule_overlay_timer();
+    }
+
+    void hide_overlay_immediately() noexcept
+    {
+        overlay_manager_.hide();
+        locator_animation_.reset();
         static_cast<void>(KillTimer(window_, overlay_timer_id));
         suppress_trigger_ctrl_release_ = false;
         double_ctrl_detector_.reset();
         shake_detector_.reset();
+    }
+
+    void schedule_overlay_timer() const noexcept
+    {
+        if (!overlay_manager_.visible())
+        {
+            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            return;
+        }
+
+        const auto phase = locator_animation_.phase();
+        const bool animating = phase == zmouse::overlay::AnimationPhase::appearing ||
+                               phase == zmouse::overlay::AnimationPhase::disappearing;
+        if (!animating && !auto_timeout_enabled_)
+        {
+            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            return;
+        }
+
+        const UINT interval = animating ? animation_timer_interval_ms : timeout_timer_interval_ms;
+        static_cast<void>(SetTimer(window_, overlay_timer_id, interval, nullptr));
     }
 
     void update_overlay_cursor() noexcept
@@ -412,25 +458,46 @@ class Application final
         overlay_manager_.move_to(position);
         if (!overlay_manager_.visible())
         {
-            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            hide_overlay_immediately();
         }
     }
 
     void on_overlay_timer() noexcept
     {
-        if (!auto_timeout_enabled_ || !overlay_manager_.visible())
+        if (!overlay_manager_.visible())
         {
-            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            hide_overlay_immediately();
             return;
         }
 
         update_overlay_cursor();
+        if (!overlay_manager_.visible())
+        {
+            return;
+        }
+
         const ULONGLONG now = GetTickCount64();
-        if (now - last_cursor_move_at_ >= overlay_idle_timeout_ms_ ||
-            now - overlay_started_at_ >= overlay_max_duration_ms_)
+        const auto frame = locator_animation_.frame(now);
+        if (!frame.surface_visible)
+        {
+            hide_overlay_immediately();
+            return;
+        }
+        overlay_manager_.set_animation_frame(frame.dim_progress, frame.ring_scale, frame.ring_opacity);
+        if (!overlay_manager_.visible())
+        {
+            hide_overlay_immediately();
+            return;
+        }
+
+        if (locator_animation_.phase() == zmouse::overlay::AnimationPhase::visible && auto_timeout_enabled_ &&
+            (now - last_cursor_move_at_ >= overlay_idle_timeout_ms_ ||
+             now - overlay_started_at_ >= overlay_max_duration_ms_))
         {
             dismiss_overlay();
+            return;
         }
+        schedule_overlay_timer();
     }
 
     LRESULT handle_message(const UINT message, const WPARAM w_param, const LPARAM l_param) noexcept
@@ -494,7 +561,10 @@ class Application final
             break;
 
         case WM_DISPLAYCHANGE:
-            static_cast<void>(overlay_manager_.rebuild());
+            if (!overlay_manager_.rebuild())
+            {
+                hide_overlay_immediately();
+            }
             return 0;
 
         case WM_CLOSE:
@@ -502,7 +572,7 @@ class Application final
             return 0;
 
         case WM_DESTROY:
-            dismiss_overlay();
+            hide_overlay_immediately();
             remove_tray_icon();
             PostQuitMessage(0);
             return 0;
@@ -677,6 +747,7 @@ class Application final
     zmouse::overlay::Point last_cursor_position_{};
     zmouse::input::DoubleCtrlDetector double_ctrl_detector_{};
     zmouse::input::ShakeDetector shake_detector_{};
+    zmouse::overlay::LocatorAnimation locator_animation_{};
     zmouse::platform::OverlayManager overlay_manager_{};
 };
 } // namespace

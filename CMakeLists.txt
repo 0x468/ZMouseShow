@@ -27,6 +27,7 @@ add_library(zmouse_core STATIC
     src/config/settings.cpp
     src/input/double_ctrl_detector.cpp
     src/input/shake_detector.cpp
+    src/overlay/locator_animation.cpp
 )
 add_library(ZMouseShow::Core ALIAS zmouse_core)
 

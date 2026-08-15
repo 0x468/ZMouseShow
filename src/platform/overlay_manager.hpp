@@ -21,6 +21,7 @@ class OverlayManager final
     [[nodiscard]] bool rebuild();
     [[nodiscard]] bool show_at(overlay::Point cursor);
     void move_to(overlay::Point cursor);
+    void set_animation_frame(double dim_progress, double ring_scale, double ring_opacity);
     void hide() noexcept;
 
     [[nodiscard]] bool visible() const noexcept;
@@ -42,9 +43,10 @@ class OverlayManager final
     [[nodiscard]] bool create_monitor_overlay(HMONITOR monitor);
     [[nodiscard]] bool create_ring_window();
     [[nodiscard]] bool apply_hole(MonitorOverlay& overlay, overlay::Point cursor, std::int32_t radius_px);
-    [[nodiscard]] bool ensure_ring_bitmap(std::int32_t radius_px);
+    [[nodiscard]] bool ensure_ring_bitmap(std::int32_t base_radius_px, double scale);
     [[nodiscard]] bool update_ring_position(overlay::Point cursor) const noexcept;
     [[nodiscard]] UINT dpi_at(overlay::Point cursor) const noexcept;
+    void apply_dim_progress() const noexcept;
     void destroy_windows() noexcept;
     void destroy_ring_bitmap() noexcept;
 
@@ -57,9 +59,14 @@ class OverlayManager final
     HBITMAP ring_bitmap_{};
     HGDIOBJ ring_old_bitmap_{};
     SIZE ring_size_{};
-    std::int32_t ring_radius_px_{};
+    std::int32_t ring_base_radius_px_{};
+    std::int32_t ring_visual_radius_px_{};
     std::int32_t spotlight_radius_dip_{120};
     BYTE dim_alpha_{153};
+    double dim_progress_{1.0};
+    double ring_scale_{1.0};
+    double ring_opacity_{1.0};
+    overlay::Point last_cursor_{};
     bool visible_{};
 };
 } // namespace zmouse::platform
