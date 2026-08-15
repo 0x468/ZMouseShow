@@ -51,6 +51,6 @@ On a single-monitor development machine, launch the built executable with `--sim
 
 Run `ZMouseShow.exe`, then press and release the configured Ctrl key twice in quick succession without pressing any other key or mouse button. The default remains left Ctrl. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to pause, enable the experimental shake trigger, enable the optional auto-timeout, or exit. Configure `[double_ctrl].side` and the optional `[hotkey]` table in `ZMouseShow.toml`, then reload it from the tray.
 
-See [the Chinese requirements](docs/需求规格说明书.md) for the full scope.
+See [the Chinese requirements](docs/需求规格说明书.md) for the full scope and [the P1 acceptance checklist](docs/P1验收清单.md) for hardware and interaction validation.
 
 The TOML parser is the vendored single-header distribution of [toml++](https://github.com/marzer/tomlplusplus), so builds remain offline and the executable has no parser DLL dependency.

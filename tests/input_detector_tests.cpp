@@ -3,6 +3,7 @@
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/geometry.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <string_view>
@@ -152,6 +153,80 @@ void test_reversals_trigger_shake()
     check(triggered, "alternating movement with enough path and reversals triggers");
 }
 
+[[nodiscard]] bool feed_default_shake(zmouse::input::ShakeDetector& detector, const std::uint32_t samples_per_leg,
+                                      const std::uint64_t timestamp_step_ms, const std::uint64_t start_timestamp = 100)
+{
+    constexpr std::array<std::int32_t, 6> legs{240, -240, 240, -240, 240, -240};
+    std::uint64_t timestamp = start_timestamp;
+    std::uint32_t sub_millisecond_sample = 0;
+    for (const auto leg : legs)
+    {
+        const auto movement = leg / static_cast<std::int32_t>(samples_per_leg);
+        for (std::uint32_t sample = 0; sample < samples_per_leg; ++sample)
+        {
+            if (detector.process({movement, 0, timestamp}, false))
+            {
+                return true;
+            }
+            if (timestamp_step_ms == 0)
+            {
+                ++sub_millisecond_sample;
+                if (sub_millisecond_sample == 8)
+                {
+                    ++timestamp;
+                    sub_millisecond_sample = 0;
+                }
+            }
+            else
+            {
+                timestamp += timestamp_step_ms;
+            }
+        }
+    }
+    return false;
+}
+
+void test_default_shake_is_stable_across_polling_rates()
+{
+    zmouse::input::ShakeDetector low_polling_detector;
+    check(feed_default_shake(low_polling_detector, 1, 8), "default shake triggers with 125 Hz-sized samples");
+
+    zmouse::input::ShakeDetector standard_polling_detector;
+    check(feed_default_shake(standard_polling_detector, 8, 1), "default shake triggers with 1000 Hz-sized samples");
+
+    zmouse::input::ShakeDetector high_polling_detector;
+    check(feed_default_shake(high_polling_detector, 16, 0), "default shake triggers with high polling-rate samples");
+}
+
+void test_default_shake_rejects_jitter_and_slow_motion()
+{
+    zmouse::input::ShakeDetector jitter_detector;
+    bool jitter_triggered = false;
+    for (std::uint64_t index = 0; index < 20; ++index)
+    {
+        const std::int32_t dx = index % 2 == 0 ? 20 : -20;
+        jitter_triggered = jitter_detector.process({dx, 0, 100 + index * 10}, false) || jitter_triggered;
+    }
+    check(!jitter_triggered, "small high-frequency jitter stays below the default distance threshold");
+
+    zmouse::input::ShakeDetector slow_detector;
+    bool slow_triggered = false;
+    for (std::uint64_t index = 0; index < 8; ++index)
+    {
+        const std::int32_t dx = index % 2 == 0 ? 240 : -240;
+        slow_triggered = slow_detector.process({dx, 0, 100 + index * 300}, false) || slow_triggered;
+    }
+    check(!slow_triggered, "slow alternating movement is pruned by the default one-second window");
+}
+
+void test_default_shake_cooldown_blocks_repeat_activation()
+{
+    zmouse::input::ShakeDetector detector;
+    check(feed_default_shake(detector, 8, 1, 100), "the initial default shake triggers");
+    check(!feed_default_shake(detector, 8, 1, 300), "a second shake inside the default cooldown is blocked");
+    check(feed_default_shake(detector, 8, 1, 1'500), "a new shake triggers after the default cooldown");
+}
+
 void test_mouse_buttons_clear_shake_history()
 {
     auto detector = make_test_shake_detector();
@@ -242,6 +317,9 @@ int main()
     test_custom_hotkey_requires_an_exact_clean_chord();
     test_single_direction_is_not_a_shake();
     test_reversals_trigger_shake();
+    test_default_shake_is_stable_across_polling_rates();
+    test_default_shake_rejects_jitter_and_slow_motion();
+    test_default_shake_cooldown_blocks_repeat_activation();
     test_mouse_buttons_clear_shake_history();
     test_active_overlay_blocks_and_clears_shake_history();
     test_locator_animation_transitions();
