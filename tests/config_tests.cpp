@@ -1,4 +1,5 @@
 #include "zmouse/config/settings.hpp"
+#include "zmouse/diagnostics/report.hpp"
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -240,6 +241,43 @@ void test_preferences_create_a_missing_configuration()
           "newly created configuration contains the requested preferences");
     remove_test_file(path);
 }
+
+void test_diagnostics_report_contains_effective_state_without_input_history()
+{
+    zmouse::diagnostics::Snapshot snapshot{
+        .version = "0.1.0-test",
+        .build_type = "Debug",
+        .architecture = "x64",
+        .generated_at_utc = "2026-08-15T00:00:00Z",
+        .config_path = "C:/portable/ZMouseShow.toml",
+        .paused = true,
+        .remote_session = false,
+        .virtual_desktop = {-2560, 0, 2560, 1440},
+        .monitors = {{.device_name = "DISPLAY1",
+                      .bounds = {-2560, 0, 0, 1440},
+                      .work_area = {-2560, 0, 0, 1400},
+                      .dpi_x = 120,
+                      .dpi_y = 120,
+                      .primary = false}},
+    };
+    snapshot.settings.double_ctrl.side = zmouse::input::ControlSide::right;
+    snapshot.settings.hotkey.enabled = true;
+
+    const auto report = zmouse::diagnostics::build_report(snapshot);
+    check(report.find("version: 0.1.0-test") != std::string::npos, "diagnostics include the application version");
+    check(report.find("virtual_desktop: -2560,0 - 2560,1440 (5120x1440)") != std::string::npos,
+          "diagnostics include negative-coordinate desktop geometry");
+    check(report.find("monitor[0].dpi: 120x120") != std::string::npos, "diagnostics include per-monitor DPI");
+    check(report.find("double_ctrl.side: right") != std::string::npos,
+          "diagnostics include effective keyboard settings");
+    check(report.find("does not contain key history") != std::string::npos,
+          "diagnostics explicitly document their privacy boundary");
+
+    const auto path = temporary_path("diagnostics-test");
+    check(zmouse::diagnostics::write_report(path, snapshot), "diagnostics can be written to disk");
+    check(read_all(path) == report, "the written diagnostics match the generated report");
+    remove_test_file(path);
+}
 } // namespace
 
 int main()
@@ -252,6 +290,7 @@ int main()
     test_file_export_load_and_no_overwrite();
     test_preferences_are_persisted_without_losing_comments();
     test_preferences_create_a_missing_configuration();
+    test_diagnostics_report_contains_effective_state_without_input_history();
 
     if (failures == 0)
     {

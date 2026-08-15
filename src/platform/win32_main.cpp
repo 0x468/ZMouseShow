@@ -5,6 +5,7 @@
 
 #include "overlay_manager.hpp"
 #include "zmouse/config/settings.hpp"
+#include "zmouse/diagnostics/report.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
@@ -13,11 +14,15 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cwchar>
 #include <filesystem>
 #include <memory>
+#include <shellscalingapi.h>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -32,6 +37,7 @@ constexpr UINT command_toggle_auto_timeout = 1003;
 constexpr UINT command_reload_configuration = 1004;
 constexpr UINT command_export_default_configuration = 1005;
 constexpr UINT command_exit = 1006;
+constexpr UINT command_export_diagnostics = 1007;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
 constexpr UINT_PTR overlay_timer_id = 1;
@@ -43,6 +49,89 @@ constexpr std::uint8_t mouse_right = 1U << 1U;
 constexpr std::uint8_t mouse_middle = 1U << 2U;
 constexpr std::uint8_t mouse_x1 = 1U << 3U;
 constexpr std::uint8_t mouse_x2 = 1U << 4U;
+
+struct MonitorCollection
+{
+    std::vector<zmouse::diagnostics::Monitor> monitors;
+    bool success{true};
+};
+
+[[nodiscard]] std::string wide_to_utf8(const std::wstring_view value) noexcept
+{
+    try
+    {
+        if (value.empty())
+        {
+            return {};
+        }
+        const int required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                                                 static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+        if (required <= 0)
+        {
+            return {};
+        }
+        std::string result(static_cast<std::size_t>(required), '\0');
+        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+                                result.data(), required, nullptr, nullptr) != required)
+        {
+            return {};
+        }
+        return result;
+    }
+    catch (...)
+    {
+        return {};
+    }
+}
+
+[[nodiscard]] std::string current_utc_time()
+{
+    SYSTEMTIME time{};
+    GetSystemTime(&time);
+    char buffer[32]{};
+    const int length = sprintf_s(buffer, "%04u-%02u-%02uT%02u:%02u:%02uZ", static_cast<unsigned>(time.wYear),
+                                 static_cast<unsigned>(time.wMonth), static_cast<unsigned>(time.wDay),
+                                 static_cast<unsigned>(time.wHour), static_cast<unsigned>(time.wMinute),
+                                 static_cast<unsigned>(time.wSecond));
+    return length > 0 ? std::string(buffer, static_cast<std::size_t>(length)) : std::string{};
+}
+
+BOOL CALLBACK collect_monitor_diagnostics(const HMONITOR monitor, HDC, LPRECT, const LPARAM data) noexcept
+{
+    auto& collection = *reinterpret_cast<MonitorCollection*>(data);
+    try
+    {
+        MONITORINFOEXW info{};
+        info.cbSize = sizeof(info);
+        if (GetMonitorInfoW(monitor, &info) == FALSE)
+        {
+            collection.success = false;
+            return FALSE;
+        }
+
+        UINT dpi_x = 96;
+        UINT dpi_y = 96;
+        if (GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y) != S_OK)
+        {
+            dpi_x = 96;
+            dpi_y = 96;
+        }
+        collection.monitors.push_back({
+            .device_name = wide_to_utf8(info.szDevice),
+            .bounds = {info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right, info.rcMonitor.bottom},
+            .work_area = {info.rcWork.left, info.rcWork.top, info.rcWork.right, info.rcWork.bottom},
+            .dpi_x = dpi_x,
+            .dpi_y = dpi_y,
+            .primary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0,
+        });
+        return TRUE;
+    }
+    catch (...)
+    {
+        collection.success = false;
+        return FALSE;
+    }
+}
 
 [[nodiscard]] std::filesystem::path resolve_config_path() noexcept
 {
@@ -255,6 +344,7 @@ class Application final
         static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
         static_cast<void>(AppendMenuW(menu, MF_STRING, command_reload_configuration, L"重新加载配置(&R)"));
         static_cast<void>(AppendMenuW(menu, MF_STRING, command_export_default_configuration, L"导出默认配置(&D)"));
+        static_cast<void>(AppendMenuW(menu, MF_STRING, command_export_diagnostics, L"导出诊断信息(&I)"));
         static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
         static_cast<void>(AppendMenuW(menu, MF_STRING, command_exit, L"退出(&X)"));
 
@@ -343,6 +433,56 @@ class Application final
             return;
         }
         show_tray_notification(L"ZMouseShow", L"未导出：文件可能已存在或路径不可写。", NIIF_WARNING);
+    }
+
+    void export_diagnostics() noexcept
+    {
+        try
+        {
+            MonitorCollection collection;
+            if (EnumDisplayMonitors(nullptr, nullptr, collect_monitor_diagnostics,
+                                    reinterpret_cast<LPARAM>(&collection)) == FALSE ||
+                !collection.success)
+            {
+                show_tray_notification(L"ZMouseShow", L"无法枚举显示器，诊断信息未导出。", NIIF_WARNING);
+                return;
+            }
+
+            const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+            const int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            const auto report_path = config_path_.parent_path() / L"ZMouseShow-diagnostics.txt";
+            const zmouse::diagnostics::Snapshot snapshot{
+                .version = ZMOUSE_VERSION,
+#if defined(NDEBUG)
+                .build_type = "Release",
+#else
+                .build_type = "Debug",
+#endif
+#if defined(_M_X64)
+                .architecture = "x64",
+#else
+                .architecture = "unknown",
+#endif
+                .generated_at_utc = current_utc_time(),
+                .config_path = wide_to_utf8(config_path_.wstring()),
+                .paused = paused_,
+                .remote_session = GetSystemMetrics(SM_REMOTESESSION) != 0,
+                .virtual_desktop = {virtual_left, virtual_top, virtual_left + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                                    virtual_top + GetSystemMetrics(SM_CYVIRTUALSCREEN)},
+                .monitors = std::move(collection.monitors),
+                .settings = settings_,
+            };
+            if (!zmouse::diagnostics::write_report(report_path, snapshot))
+            {
+                show_tray_notification(L"ZMouseShow", L"诊断信息无法写入配置目录。", NIIF_WARNING);
+                return;
+            }
+            show_tray_notification(L"ZMouseShow", L"诊断信息已导出到配置目录。", NIIF_INFO);
+        }
+        catch (...)
+        {
+            show_tray_notification(L"ZMouseShow", L"导出诊断信息时发生错误。", NIIF_WARNING);
+        }
     }
 
     void persist_preferences() noexcept
@@ -538,6 +678,9 @@ class Application final
                 return 0;
             case command_export_default_configuration:
                 export_default_configuration();
+                return 0;
+            case command_export_diagnostics:
+                export_diagnostics();
                 return 0;
             case command_exit:
                 DestroyWindow(window_);

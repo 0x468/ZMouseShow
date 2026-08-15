@@ -44,6 +44,7 @@ The tray menu can reload the active configuration or export a documented default
 - 220 ms fade transitions and a contracting pulse ring driven by a tested animation state machine
 - Spotlight tracking, input dismissal, optional auto-timeout, and display-change rebuild
 - Embedded defaults plus optional portable TOML loading, reloading, atomic preference persistence, and safe default export
+- Privacy-bounded diagnostics export with effective settings and multi-monitor/DPI topology
 
 Run `ZMouseShow.exe`, then press and release the configured Ctrl key twice in quick succession without pressing any other key or mouse button. The default remains left Ctrl. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to pause, enable the experimental shake trigger, enable the optional auto-timeout, or exit. Configure `[double_ctrl].side` and the optional `[hotkey]` table in `ZMouseShow.toml`, then reload it from the tray.
 

@@ -25,6 +25,7 @@ include(ProjectOptions)
 
 add_library(zmouse_core STATIC
     src/config/settings.cpp
+    src/diagnostics/report.cpp
     src/input/double_ctrl_detector.cpp
     src/input/hotkey_detector.cpp
     src/input/shake_detector.cpp
@@ -54,8 +55,10 @@ target_link_libraries(ZMouseShow
         ZMouseShow::Core
         gdi32
         shell32
+        shcore
         user32
 )
+target_compile_definitions(ZMouseShow PRIVATE ZMOUSE_VERSION="${PROJECT_VERSION}")
 zmouse_apply_project_options(ZMouseShow)
 zmouse_apply_windows_hardening(ZMouseShow)
 
