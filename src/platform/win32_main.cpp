@@ -495,8 +495,9 @@ class Application final
 
     void activate_overlay() noexcept
     {
-        if (overlay_manager_.visible())
+        if (paused_ || overlay_manager_.visible())
         {
+            pending_trigger_key_releases_.reset();
             return;
         }
 
@@ -526,6 +527,29 @@ class Application final
         double_ctrl_detector_.reset();
         shake_detector_.reset();
         schedule_overlay_timer();
+    }
+
+    void request_overlay_activation(const bool capture_pressed_keys) noexcept
+    {
+        if (activation_pending_ || paused_ || overlay_manager_.visible())
+        {
+            return;
+        }
+
+        if (capture_pressed_keys)
+        {
+            pending_trigger_key_releases_ = key_down_;
+        }
+        else
+        {
+            pending_trigger_key_releases_.reset();
+        }
+        activation_pending_ = true;
+        if (PostMessageW(window_, message_activate, 0, 0) == FALSE)
+        {
+            activation_pending_ = false;
+            pending_trigger_key_releases_.reset();
+        }
     }
 
     void dismiss_overlay() noexcept
@@ -698,6 +722,7 @@ class Application final
             return 0;
 
         case message_activate:
+            activation_pending_ = false;
             activate_overlay();
             return 0;
 
@@ -819,9 +844,8 @@ class Application final
         };
         if (hotkey_detector_.process(hotkey_event))
         {
-            pending_trigger_key_releases_ = key_down_;
             double_ctrl_detector_.reset();
-            static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
+            request_overlay_activation(true);
             return;
         }
 
@@ -835,8 +859,7 @@ class Application final
         };
         if (double_ctrl_detector_.process(control_event, any_other_key_down, mouse_buttons_ != 0))
         {
-            pending_trigger_key_releases_ = key_down_;
-            static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
+            request_overlay_activation(true);
         }
     }
 
@@ -900,7 +923,8 @@ class Application final
             update_overlay_cursor();
         }
 
-        if (overlay_was_visible || paused_ || !shake_enabled_ || (mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0)
+        if (overlay_was_visible || activation_pending_ || paused_ || !shake_enabled_ ||
+            (mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0)
         {
             return;
         }
@@ -912,8 +936,7 @@ class Application final
         };
         if (shake_detector_.process(movement, false))
         {
-            pending_trigger_key_releases_.reset();
-            static_cast<void>(PostMessageW(window_, message_activate, 0, 0));
+            request_overlay_activation(false);
         }
     }
 
@@ -943,6 +966,7 @@ class Application final
     std::bitset<512> key_down_{};
     std::bitset<512> suppressed_key_releases_{};
     std::bitset<512> pending_trigger_key_releases_{};
+    bool activation_pending_{};
     std::uint8_t mouse_buttons_{};
     ULONGLONG overlay_idle_timeout_ms_{1'200};
     ULONGLONG overlay_max_duration_ms_{5'000};
