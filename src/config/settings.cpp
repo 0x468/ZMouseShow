@@ -254,7 +254,7 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
     }
 }
 
-[[nodiscard]] bool is_general_header(std::string_view line) noexcept
+[[nodiscard]] bool table_header_matches(std::string_view line, const std::string_view expected) noexcept
 {
     line = trim(line);
     if (line.starts_with("\xEF\xBB\xBF"))
@@ -279,7 +279,7 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
     {
         name = name.substr(1, name.size() - 2);
     }
-    return name == "general";
+    return name == expected;
 }
 
 [[nodiscard]] bool is_table_header(std::string_view line) noexcept
@@ -362,23 +362,77 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
     return std::nullopt;
 }
 
-void append_preference(std::string& output, const std::string_view key, const bool value)
+[[nodiscard]] std::size_t assignment_value_end(const std::string_view line, const std::size_t value_offset) noexcept
+{
+    bool in_basic_string = false;
+    bool in_literal_string = false;
+    bool escaped = false;
+    std::size_t end = line.size();
+    for (std::size_t index = value_offset; index < line.size(); ++index)
+    {
+        const char character = line[index];
+        if (in_basic_string)
+        {
+            if (character == '"' && !escaped)
+            {
+                in_basic_string = false;
+            }
+            escaped = character == '\\' && !escaped;
+            if (character != '\\')
+            {
+                escaped = false;
+            }
+            continue;
+        }
+        if (in_literal_string)
+        {
+            if (character == '\'')
+            {
+                in_literal_string = false;
+            }
+            continue;
+        }
+        if (character == '"')
+        {
+            in_basic_string = true;
+        }
+        else if (character == '\'')
+        {
+            in_literal_string = true;
+        }
+        else if (character == '#')
+        {
+            end = index;
+            break;
+        }
+    }
+    while (end > value_offset && (line[end - 1] == ' ' || line[end - 1] == '\t'))
+    {
+        --end;
+    }
+    return end;
+}
+
+void append_assignment(std::string& output, const std::string_view key, const std::string_view value)
 {
     if (!output.empty() && output.back() != '\n')
     {
         output.push_back('\n');
     }
     output.append(key);
-    output.append(value ? " = true\n" : " = false\n");
+    output.append(" = ");
+    output.append(value);
+    output.push_back('\n');
 }
 
-[[nodiscard]] std::string patch_boolean(std::string_view contents, const std::string_view key, const bool value)
+[[nodiscard]] std::string patch_value(std::string_view contents, const std::string_view table,
+                                      const std::string_view key, const std::string_view value)
 {
     std::string output;
-    output.reserve(contents.size() + key.size() + 16);
+    output.reserve(contents.size() + table.size() + key.size() + value.size() + 16);
 
-    bool in_general = false;
-    bool found_general = false;
+    bool in_target_table = false;
+    bool found_target_table = false;
     bool replaced = false;
     std::size_t offset = 0;
     while (offset < contents.size())
@@ -398,39 +452,27 @@ void append_preference(std::string& output, const std::string_view key, const bo
 
         if (is_table_header(content))
         {
-            if (in_general && !replaced)
+            if (in_target_table && !replaced)
             {
-                append_preference(output, key, value);
+                append_assignment(output, key, value);
                 replaced = true;
             }
-            in_general = is_general_header(content);
-            found_general = found_general || in_general;
+            in_target_table = table_header_matches(content, table);
+            found_target_table = found_target_table || in_target_table;
         }
 
-        if (in_general)
+        if (in_target_table)
         {
             if (const auto value_offset = assignment_value_offset(content, key))
             {
-                const auto old_value = content.substr(*value_offset);
-                std::size_t old_value_length = 0;
-                if (old_value.starts_with("true"))
-                {
-                    old_value_length = 4;
-                }
-                else if (old_value.starts_with("false"))
-                {
-                    old_value_length = 5;
-                }
-                if (old_value_length != 0)
-                {
-                    output.append(content.substr(0, *value_offset));
-                    output.append(value ? "true" : "false");
-                    output.append(content.substr(*value_offset + old_value_length));
-                    output.append(line.substr(content.size()));
-                    replaced = true;
-                    offset = end;
-                    continue;
-                }
+                const auto value_end = assignment_value_end(content, *value_offset);
+                output.append(content.substr(0, *value_offset));
+                output.append(value);
+                output.append(content.substr(value_end));
+                output.append(line.substr(content.size()));
+                replaced = true;
+                offset = end;
+                continue;
             }
         }
 
@@ -438,11 +480,11 @@ void append_preference(std::string& output, const std::string_view key, const bo
         offset = end;
     }
 
-    if (found_general)
+    if (found_target_table)
     {
         if (!replaced)
         {
-            append_preference(output, key, value);
+            append_assignment(output, key, value);
         }
         return output;
     }
@@ -455,9 +497,16 @@ void append_preference(std::string& output, const std::string_view key, const bo
     {
         output.push_back('\n');
     }
-    output.append("[general]\n");
-    append_preference(output, key, value);
+    output.push_back('[');
+    output.append(table);
+    output.append("]\n");
+    append_assignment(output, key, value);
     return output;
+}
+
+[[nodiscard]] std::string patch_boolean(const std::string_view contents, const std::string_view key, const bool value)
+{
+    return patch_value(contents, "general", key, value ? "true" : "false");
 }
 
 [[nodiscard]] bool write_atomically(const std::filesystem::path& path, const std::string_view contents) noexcept
@@ -586,6 +635,64 @@ bool persist_runtime_preferences(const std::filesystem::path& path, const bool s
         const auto verified = parse_toml(updated);
         if (!verified || verified->shake_enabled != shake_enabled ||
             verified->auto_timeout_enabled != auto_timeout_enabled)
+        {
+            return false;
+        }
+        return write_atomically(path, updated);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool persist_basic_settings(const std::filesystem::path& path, const Settings& settings) noexcept
+{
+    try
+    {
+        std::error_code error;
+        const bool exists = std::filesystem::exists(path, error);
+        if (error)
+        {
+            return false;
+        }
+
+        const auto existing = exists ? read_file(path) : std::optional<std::string>{std::string(default_configuration)};
+        if (!existing)
+        {
+            return false;
+        }
+        static_cast<void>(toml::parse(*existing));
+
+        std::string_view side = "left";
+        if (settings.double_ctrl.side == input::ControlSide::right)
+        {
+            side = "right";
+        }
+        else if (settings.double_ctrl.side == input::ControlSide::either)
+        {
+            side = "either";
+        }
+
+        auto updated = patch_value(*existing, "general", "shake_enabled", settings.shake_enabled ? "true" : "false");
+        updated =
+            patch_value(updated, "general", "auto_timeout_enabled", settings.auto_timeout_enabled ? "true" : "false");
+        updated = patch_value(updated, "double_ctrl", "side", '"' + std::string(side) + '"');
+        updated = patch_value(updated, "hotkey", "enabled", settings.hotkey.enabled ? "true" : "false");
+        updated = patch_value(updated, "overlay", "radius_dip", std::to_string(settings.spotlight_radius_dip));
+        updated = patch_value(updated, "overlay", "dim_opacity_percent", std::to_string(settings.dim_opacity_percent));
+        if (updated.size() > maximum_config_size)
+        {
+            return false;
+        }
+
+        const auto verified = parse_toml(updated);
+        if (!verified || verified->shake_enabled != settings.shake_enabled ||
+            verified->auto_timeout_enabled != settings.auto_timeout_enabled ||
+            verified->double_ctrl.side != settings.double_ctrl.side ||
+            verified->hotkey.enabled != settings.hotkey.enabled ||
+            verified->spotlight_radius_dip != settings.spotlight_radius_dip ||
+            verified->dim_opacity_percent != settings.dim_opacity_percent)
         {
             return false;
         }

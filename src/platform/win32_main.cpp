@@ -5,6 +5,7 @@
 
 #include "display_simulator.hpp"
 #include "overlay_manager.hpp"
+#include "settings_dialog.hpp"
 #include "zmouse/config/settings.hpp"
 #include "zmouse/diagnostics/report.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
@@ -39,6 +40,7 @@ constexpr UINT command_reload_configuration = 1004;
 constexpr UINT command_export_default_configuration = 1005;
 constexpr UINT command_exit = 1006;
 constexpr UINT command_export_diagnostics = 1007;
+constexpr UINT command_settings = 1008;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
 constexpr UINT_PTR overlay_timer_id = 1;
@@ -224,6 +226,11 @@ class Application final
             return 1;
         }
 
+        if (has_command_line_switch(L"--settings"))
+        {
+            show_settings();
+        }
+
         MSG message{};
         while (true)
         {
@@ -357,6 +364,8 @@ class Application final
             return;
         }
 
+        static_cast<void>(AppendMenuW(menu, MF_STRING, command_settings, L"设置(&O)..."));
+        static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
         const UINT pause_flags = MF_STRING | (paused_ ? MF_CHECKED : MF_UNCHECKED);
         static_cast<void>(AppendMenuW(menu, pause_flags, command_toggle_pause, L"暂停(&P)"));
         const UINT shake_flags = MF_STRING | (shake_enabled_ ? MF_CHECKED : MF_UNCHECKED);
@@ -513,6 +522,30 @@ class Application final
         {
             show_tray_notification(L"ZMouseShow", L"设置已生效，但无法保存到 TOML 配置。", NIIF_WARNING);
         }
+    }
+
+    static bool apply_dialog_settings(void* context, const zmouse::config::Settings& settings) noexcept
+    {
+        auto& application = *static_cast<Application*>(context);
+        if (!zmouse::config::persist_basic_settings(application.config_path_, settings))
+        {
+            return false;
+        }
+        application.apply_settings(settings);
+        return true;
+    }
+
+    void show_settings() noexcept
+    {
+        if (settings_dialog_open_)
+        {
+            return;
+        }
+        settings_dialog_open_ = true;
+        hide_overlay_immediately();
+        static_cast<void>(
+            zmouse::platform::show_settings_dialog(instance_, nullptr, settings_, apply_dialog_settings, this));
+        settings_dialog_open_ = false;
     }
 
     void activate_overlay() noexcept
@@ -710,6 +743,9 @@ class Application final
         case WM_COMMAND:
             switch (LOWORD(w_param))
             {
+            case command_settings:
+                show_settings();
+                return 0;
             case command_toggle_pause:
                 toggle_pause();
                 return 0;
@@ -985,6 +1021,7 @@ class Application final
     bool paused_{};
     bool shake_enabled_{};
     bool auto_timeout_enabled_{};
+    bool settings_dialog_open_{};
     std::bitset<512> key_down_{};
     std::bitset<512> suppressed_key_releases_{};
     std::bitset<512> pending_trigger_key_releases_{};
@@ -1019,6 +1056,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
+        if (has_command_line_switch(L"--settings"))
+        {
+            if (const HWND existing_window = FindWindowW(window_class_name, window_title); existing_window != nullptr)
+            {
+                static_cast<void>(SetForegroundWindow(existing_window));
+                static_cast<void>(PostMessageW(existing_window, WM_COMMAND, command_settings, 0));
+            }
+        }
         CloseHandle(instance_mutex);
         return 0;
     }

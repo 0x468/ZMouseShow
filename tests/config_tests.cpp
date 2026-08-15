@@ -242,6 +242,71 @@ void test_preferences_create_a_missing_configuration()
     remove_test_file(path);
 }
 
+void test_basic_settings_are_persisted_without_losing_comments()
+{
+    const auto path = temporary_path("basic-settings-test");
+    {
+        std::ofstream stream(path, std::ios::binary);
+        stream << R"toml(# keep the file comment
+[general]
+shake_enabled = false # keep shake comment
+auto_timeout_enabled = false
+
+[overlay]
+radius_dip = 120 # keep radius comment
+dim_opacity_percent = 60
+
+[double_ctrl]
+minimum_interval_ms = 100
+
+[hotkey]
+enabled = false # keep hotkey comment
+
+[custom]
+answer = 42
+)toml";
+    }
+
+    zmouse::config::Settings settings;
+    settings.shake_enabled = true;
+    settings.auto_timeout_enabled = true;
+    settings.spotlight_radius_dip = 180;
+    settings.dim_opacity_percent = 72;
+    settings.double_ctrl.side = zmouse::input::ControlSide::right;
+    settings.hotkey.enabled = true;
+    check(zmouse::config::persist_basic_settings(path, settings), "basic dialog settings can be persisted");
+
+    const auto contents = read_all(path);
+    check(contents.find("# keep the file comment") != std::string::npos, "basic persistence keeps file comments");
+    check(contents.find("# keep radius comment") != std::string::npos, "basic persistence keeps inline comments");
+    check(contents.find("[custom]\nanswer = 42") != std::string::npos, "basic persistence keeps unknown tables");
+
+    const auto loaded = zmouse::config::load_toml(path);
+    check(loaded && loaded->shake_enabled && loaded->auto_timeout_enabled, "persisted general settings load back");
+    check(loaded && loaded->spotlight_radius_dip == 180 && loaded->dim_opacity_percent == 72,
+          "persisted overlay settings load back");
+    check(loaded && loaded->double_ctrl.side == zmouse::input::ControlSide::right && loaded->hotkey.enabled,
+          "persisted trigger settings load back");
+    remove_test_file(path);
+}
+
+void test_basic_settings_create_a_missing_configuration()
+{
+    const auto path = temporary_path("missing-basic-settings-test");
+    remove_test_file(path);
+
+    zmouse::config::Settings settings;
+    settings.shake_enabled = true;
+    settings.spotlight_radius_dip = 160;
+    check(zmouse::config::persist_basic_settings(path, settings),
+          "basic dialog settings create a missing configuration");
+
+    const auto loaded = zmouse::config::load_toml(path);
+    check(loaded && loaded->shake_enabled && loaded->spotlight_radius_dip == 160,
+          "newly created basic settings load back");
+    remove_test_file(path);
+}
+
 void test_diagnostics_report_contains_effective_state_without_input_history()
 {
     zmouse::diagnostics::Snapshot snapshot{
@@ -290,6 +355,8 @@ int main()
     test_file_export_load_and_no_overwrite();
     test_preferences_are_persisted_without_losing_comments();
     test_preferences_create_a_missing_configuration();
+    test_basic_settings_are_persisted_without_losing_comments();
+    test_basic_settings_create_a_missing_configuration();
     test_diagnostics_report_contains_effective_state_without_input_history();
 
     if (failures == 0)

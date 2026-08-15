@@ -30,5 +30,6 @@ struct Settings
 [[nodiscard]] bool write_default_toml(const std::filesystem::path& path) noexcept;
 [[nodiscard]] bool persist_runtime_preferences(const std::filesystem::path& path, bool shake_enabled,
                                                bool auto_timeout_enabled) noexcept;
+[[nodiscard]] bool persist_basic_settings(const std::filesystem::path& path, const Settings& settings) noexcept;
 [[nodiscard]] std::string_view default_toml_text() noexcept;
 } // namespace zmouse::config
