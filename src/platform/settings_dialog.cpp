@@ -247,7 +247,7 @@ class SettingsDialog final
 
         try
         {
-            return self->handle_message(message, w_param);
+            return self->handle_message(message, w_param, l_param);
         }
         catch (...)
         {
@@ -257,7 +257,7 @@ class SettingsDialog final
         }
     }
 
-    INT_PTR handle_message(const UINT message, const WPARAM w_param)
+    INT_PTR handle_message(const UINT message, const WPARAM w_param, const LPARAM l_param)
     {
         switch (message)
         {
@@ -266,6 +266,8 @@ class SettingsDialog final
             return TRUE;
         case WM_COMMAND:
             return handle_command(LOWORD(w_param), HIWORD(w_param));
+        case WM_HSCROLL:
+            return handle_scroll(reinterpret_cast<HWND>(l_param));
         default:
             return FALSE;
         }
@@ -293,64 +295,102 @@ class SettingsDialog final
         static_cast<void>(SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_ADDSTRING, 0,
                                               reinterpret_cast<LPARAM>(L"严格（抑制全部）")));
 
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_SHAKE_SENSITIVITY, TBM_SETRANGE, TRUE,
+                                MAKELPARAM(input::minimum_shake_sensitivity, input::maximum_shake_sensitivity)));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_SHAKE_SENSITIVITY, TBM_SETTICFREQ, 1, 0));
+        populate_controls(draft_);
+        EnableWindow(GetDlgItem(dialog_, IDC_APPLY_SETTINGS), FALSE);
+        initializing_ = false;
+        return;
+    }
+
+    void populate_controls(const config::Settings& settings)
+    {
+        const bool was_initializing = initializing_;
+        initializing_ = true;
+
         int side = 0;
-        if (draft_.double_ctrl.side == input::ControlSide::right)
+        if (settings.double_ctrl.side == input::ControlSide::right)
         {
             side = 1;
         }
-        else if (draft_.double_ctrl.side == input::ControlSide::either)
+        else if (settings.double_ctrl.side == input::ControlSide::either)
         {
             side = 2;
         }
         static_cast<void>(SendDlgItemMessageW(dialog_, IDC_CTRL_SIDE, CB_SETCURSEL, side, 0));
 
         int shape = 0;
-        if (draft_.spotlight_shape == overlay::SpotlightShape::rounded_square)
+        if (settings.spotlight_shape == overlay::SpotlightShape::rounded_square)
         {
             shape = 1;
         }
-        else if (draft_.spotlight_shape == overlay::SpotlightShape::diamond)
+        else if (settings.spotlight_shape == overlay::SpotlightShape::diamond)
         {
             shape = 2;
         }
         static_cast<void>(SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_SETCURSEL, shape, 0));
+
         int fullscreen_suppression = 0;
-        if (draft_.activation_policy.fullscreen_suppression == policy::FullscreenSuppression::off)
+        if (settings.activation_policy.fullscreen_suppression == policy::FullscreenSuppression::off)
         {
             fullscreen_suppression = 1;
         }
-        else if (draft_.activation_policy.fullscreen_suppression == policy::FullscreenSuppression::strict)
+        else if (settings.activation_policy.fullscreen_suppression == policy::FullscreenSuppression::strict)
         {
             fullscreen_suppression = 2;
         }
         static_cast<void>(
             SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_SETCURSEL, fullscreen_suppression, 0));
-        CheckDlgButton(dialog_, IDC_SHAKE_ENABLED, draft_.shake_enabled ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dialog_, IDC_DOUBLE_CTRL_ENABLED, draft_.double_ctrl.enabled ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dialog_, IDC_HOTKEY_ENABLED, draft_.hotkey.enabled ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dialog_, IDC_AUTO_TIMEOUT_ENABLED, draft_.auto_timeout_enabled ? BST_CHECKED : BST_UNCHECKED);
+
+        CheckDlgButton(dialog_, IDC_SHAKE_ENABLED, settings.shake_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_DOUBLE_CTRL_ENABLED, settings.double_ctrl.enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_HOTKEY_ENABLED, settings.hotkey.enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_AUTO_TIMEOUT_ENABLED, settings.auto_timeout_enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_FOCUS_RING_ENABLED,
-                       draft_.effects.focus_ring_enabled ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dialog_, IDC_RIPPLE_ENABLED, draft_.effects.ripple_enabled ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dialog_, IDC_CROSSHAIR_ENABLED, draft_.effects.crosshair_enabled ? BST_CHECKED : BST_UNCHECKED);
+                       settings.effects.focus_ring_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_RIPPLE_ENABLED, settings.effects.ripple_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_CROSSHAIR_ENABLED,
+                       settings.effects.crosshair_enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_ENLARGED_CURSOR_ENABLED,
-                       draft_.effects.enlarged_cursor_enabled ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(dialog_, IDC_STARTUP_ENABLED, draft_.startup_enabled ? BST_CHECKED : BST_UNCHECKED);
-        EnableWindow(GetDlgItem(dialog_, IDC_CTRL_SIDE), draft_.double_ctrl.enabled ? TRUE : FALSE);
+                       settings.effects.enlarged_cursor_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_STARTUP_ENABLED, settings.startup_enabled ? BST_CHECKED : BST_UNCHECKED);
+
+        EnableWindow(GetDlgItem(dialog_, IDC_CTRL_SIDE), settings.double_ctrl.enabled ? TRUE : FALSE);
         EnableWindow(GetDlgItem(dialog_, IDC_CURSOR_SCALE_PERCENT),
-                     draft_.effects.enlarged_cursor_enabled ? TRUE : FALSE);
-        SetDlgItemInt(dialog_, IDC_RADIUS_DIP, static_cast<UINT>(draft_.spotlight_radius_dip), FALSE);
-        SetDlgItemInt(dialog_, IDC_DIM_OPACITY, draft_.dim_opacity_percent, FALSE);
-        SetDlgItemInt(dialog_, IDC_CURSOR_SCALE_PERCENT, draft_.effects.cursor_scale_percent, FALSE);
-        const auto excluded_processes = format_excluded_processes(draft_.activation_policy.excluded_processes);
+                     settings.effects.enlarged_cursor_enabled ? TRUE : FALSE);
+        set_shake_controls_enabled(settings.shake_enabled);
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_SHAKE_SENSITIVITY, TBM_SETPOS, TRUE,
+                                              input::shake_sensitivity_for_distance(settings.shake.minimum_distance)));
+        update_shake_sensitivity_summary();
+
+        SetDlgItemInt(dialog_, IDC_RADIUS_DIP, static_cast<UINT>(settings.spotlight_radius_dip), FALSE);
+        SetDlgItemInt(dialog_, IDC_DIM_OPACITY, settings.dim_opacity_percent, FALSE);
+        SetDlgItemInt(dialog_, IDC_CURSOR_SCALE_PERCENT, settings.effects.cursor_scale_percent, FALSE);
+        const auto excluded_processes = format_excluded_processes(settings.activation_policy.excluded_processes);
         SetDlgItemTextW(dialog_, IDC_EXCLUDED_PROCESSES, excluded_processes.c_str());
 
-        set_hotkey_controls(draft_.hotkey);
-        set_hotkey_controls_enabled(draft_.hotkey.enabled);
+        set_hotkey_controls(settings.hotkey);
+        set_hotkey_controls_enabled(settings.hotkey.enabled);
         update_hotkey_summary();
-        EnableWindow(GetDlgItem(dialog_, IDC_APPLY_SETTINGS), FALSE);
-        initializing_ = false;
-        return;
+        initializing_ = was_initializing;
+    }
+
+    INT_PTR handle_scroll(const HWND control)
+    {
+        if (control != GetDlgItem(dialog_, IDC_SHAKE_SENSITIVITY))
+        {
+            return FALSE;
+        }
+        update_shake_sensitivity_summary();
+        if (!initializing_)
+        {
+            shake_sensitivity_changed_ = true;
+            dirty_ = true;
+            EnableWindow(GetDlgItem(dialog_, IDC_APPLY_SETTINGS), TRUE);
+        }
+        return TRUE;
     }
 
     INT_PTR handle_command(const WORD control, const WORD notification)
@@ -373,6 +413,15 @@ class SettingsDialog final
             static_cast<void>(apply_changes());
             return TRUE;
         }
+        if (control == IDC_RESTORE_DEFAULTS && notification == BN_CLICKED)
+        {
+            draft_ = config::Settings{};
+            populate_controls(draft_);
+            shake_sensitivity_changed_ = true;
+            dirty_ = true;
+            EnableWindow(GetDlgItem(dialog_, IDC_APPLY_SETTINGS), TRUE);
+            return TRUE;
+        }
         if (control == IDC_HOTKEY_RESET && notification == BN_CLICKED)
         {
             auto defaults = input::HotkeyConfig{};
@@ -388,6 +437,11 @@ class SettingsDialog final
         {
             const bool enabled = IsDlgButtonChecked(dialog_, IDC_DOUBLE_CTRL_ENABLED) == BST_CHECKED;
             EnableWindow(GetDlgItem(dialog_, IDC_CTRL_SIDE), enabled ? TRUE : FALSE);
+        }
+        if (control == IDC_SHAKE_ENABLED && notification == BN_CLICKED)
+        {
+            const bool enabled = IsDlgButtonChecked(dialog_, IDC_SHAKE_ENABLED) == BST_CHECKED;
+            set_shake_controls_enabled(enabled);
         }
         if (control == IDC_HOTKEY_ENABLED && notification == BN_CLICKED)
         {
@@ -474,8 +528,18 @@ class SettingsDialog final
             return false;
         }
 
-        settings = applied_;
+        settings = draft_;
         settings.shake_enabled = IsDlgButtonChecked(dialog_, IDC_SHAKE_ENABLED) == BST_CHECKED;
+        if (shake_sensitivity_changed_)
+        {
+            const auto sensitivity =
+                static_cast<std::uint32_t>(SendDlgItemMessageW(dialog_, IDC_SHAKE_SENSITIVITY, TBM_GETPOS, 0, 0));
+            if (sensitivity < input::minimum_shake_sensitivity || sensitivity > input::maximum_shake_sensitivity)
+            {
+                return false;
+            }
+            settings.shake.minimum_distance = input::shake_distance_for_sensitivity(sensitivity);
+        }
         settings.double_ctrl.enabled = IsDlgButtonChecked(dialog_, IDC_DOUBLE_CTRL_ENABLED) == BST_CHECKED;
         settings.hotkey = hotkey_from_controls();
         const auto hotkey_validation = input::validate_hotkey_config(settings.hotkey);
@@ -530,6 +594,7 @@ class SettingsDialog final
             return false;
         }
         applied_ = draft_;
+        shake_sensitivity_changed_ = false;
         dirty_ = false;
         EnableWindow(GetDlgItem(dialog_, IDC_APPLY_SETTINGS), FALSE);
         return true;
@@ -547,6 +612,20 @@ class SettingsDialog final
             .shift = (modifiers & HOTKEYF_SHIFT) != 0,
             .windows = IsDlgButtonChecked(dialog_, IDC_HOTKEY_WINDOWS) == BST_CHECKED,
         };
+    }
+
+    void set_shake_controls_enabled(const bool enabled) const noexcept
+    {
+        EnableWindow(GetDlgItem(dialog_, IDC_SHAKE_SENSITIVITY), enabled ? TRUE : FALSE);
+        EnableWindow(GetDlgItem(dialog_, IDC_SHAKE_SENSITIVITY_VALUE), enabled ? TRUE : FALSE);
+    }
+
+    void update_shake_sensitivity_summary() const noexcept
+    {
+        const auto sensitivity = SendDlgItemMessageW(dialog_, IDC_SHAKE_SENSITIVITY, TBM_GETPOS, 0, 0);
+        wchar_t text[16]{};
+        static_cast<void>(std::swprintf(text, std::size(text), L"%lld / 10", static_cast<long long>(sensitivity)));
+        SetDlgItemTextW(dialog_, IDC_SHAKE_SENSITIVITY_VALUE, text);
     }
 
     void set_hotkey_controls(const input::HotkeyConfig& hotkey) const noexcept
@@ -609,6 +688,7 @@ class SettingsDialog final
     void* context_{};
     bool initializing_{};
     bool dirty_{};
+    bool shake_sensitivity_changed_{};
 };
 } // namespace
 

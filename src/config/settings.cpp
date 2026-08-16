@@ -3,6 +3,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -78,6 +80,18 @@ cooldown_ms = 800
         return {};
     }
     return value.substr(first, value.find_last_not_of(whitespace) - first + 1);
+}
+
+[[nodiscard]] std::string toml_double(const double value)
+{
+    std::array<char, 64> buffer{};
+    const auto [end, error] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+                                            std::chars_format::general, std::numeric_limits<double>::max_digits10);
+    if (error != std::errc{})
+    {
+        return {};
+    }
+    return {buffer.data(), end};
 }
 
 template <typename Value>
@@ -886,8 +900,15 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
         auto updated = patch_value(*existing, "general", "shake_enabled", settings.shake_enabled ? "true" : "false");
         updated =
             patch_value(updated, "general", "auto_timeout_enabled", settings.auto_timeout_enabled ? "true" : "false");
+        updated = patch_value(updated, "timeout", "idle_ms", std::to_string(settings.idle_timeout_ms));
+        updated = patch_value(updated, "timeout", "maximum_duration_ms", std::to_string(settings.maximum_duration_ms));
         updated = patch_value(updated, "double_ctrl", "enabled", settings.double_ctrl.enabled ? "true" : "false");
         updated = patch_value(updated, "double_ctrl", "side", '"' + std::string(side) + '"');
+        updated = patch_value(updated, "double_ctrl", "minimum_interval_ms",
+                              std::to_string(settings.double_ctrl.minimum_interval_ms));
+        updated = patch_value(updated, "double_ctrl", "maximum_interval_ms",
+                              std::to_string(settings.double_ctrl.maximum_interval_ms));
+        updated = patch_value(updated, "double_ctrl", "cooldown_ms", std::to_string(settings.double_ctrl.cooldown_ms));
         updated = patch_value(updated, "hotkey", "enabled", settings.hotkey.enabled ? "true" : "false");
         updated = patch_value(updated, "hotkey", "key", '"' + hotkey_key + '"');
         updated = patch_value(updated, "hotkey", "control", settings.hotkey.control ? "true" : "false");
@@ -913,6 +934,12 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
         updated = patch_value(updated, "behavior", "excluded_processes",
                               excluded_processes_toml(settings.activation_policy.excluded_processes));
         updated = patch_value(updated, "startup", "enabled", settings.startup_enabled ? "true" : "false");
+        updated = patch_value(updated, "shake", "interval_ms", std::to_string(settings.shake.interval_ms));
+        updated = patch_value(updated, "shake", "minimum_distance", toml_double(settings.shake.minimum_distance));
+        updated = patch_value(updated, "shake", "minimum_path_to_diagonal_ratio",
+                              toml_double(settings.shake.minimum_path_to_diagonal_ratio));
+        updated = patch_value(updated, "shake", "minimum_reversals", std::to_string(settings.shake.minimum_reversals));
+        updated = patch_value(updated, "shake", "cooldown_ms", std::to_string(settings.shake.cooldown_ms));
         if (updated.size() > maximum_config_size)
         {
             return false;
@@ -921,8 +948,13 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
         const auto verified = parse_toml(updated);
         if (!verified || verified->shake_enabled != settings.shake_enabled ||
             verified->auto_timeout_enabled != settings.auto_timeout_enabled ||
+            verified->idle_timeout_ms != settings.idle_timeout_ms ||
+            verified->maximum_duration_ms != settings.maximum_duration_ms ||
             verified->double_ctrl.enabled != settings.double_ctrl.enabled ||
             verified->double_ctrl.side != settings.double_ctrl.side ||
+            verified->double_ctrl.minimum_interval_ms != settings.double_ctrl.minimum_interval_ms ||
+            verified->double_ctrl.maximum_interval_ms != settings.double_ctrl.maximum_interval_ms ||
+            verified->double_ctrl.cooldown_ms != settings.double_ctrl.cooldown_ms ||
             verified->hotkey.enabled != settings.hotkey.enabled || verified->hotkey.key != settings.hotkey.key ||
             verified->hotkey.control != settings.hotkey.control || verified->hotkey.alt != settings.hotkey.alt ||
             verified->hotkey.shift != settings.hotkey.shift || verified->hotkey.windows != settings.hotkey.windows ||
@@ -936,7 +968,12 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
             verified->effects.cursor_scale_percent != settings.effects.cursor_scale_percent ||
             verified->activation_policy.fullscreen_suppression != settings.activation_policy.fullscreen_suppression ||
             verified->activation_policy.excluded_processes != settings.activation_policy.excluded_processes ||
-            verified->startup_enabled != settings.startup_enabled)
+            verified->startup_enabled != settings.startup_enabled ||
+            verified->shake.interval_ms != settings.shake.interval_ms ||
+            verified->shake.minimum_distance != settings.shake.minimum_distance ||
+            verified->shake.minimum_path_to_diagonal_ratio != settings.shake.minimum_path_to_diagonal_ratio ||
+            verified->shake.minimum_reversals != settings.shake.minimum_reversals ||
+            verified->shake.cooldown_ms != settings.shake.cooldown_ms)
         {
             return false;
         }

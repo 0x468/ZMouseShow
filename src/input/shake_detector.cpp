@@ -1,19 +1,47 @@
 #include "zmouse/input/shake_detector.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <utility>
 
 namespace zmouse::input
 {
 namespace
 {
+constexpr std::array<double, maximum_shake_sensitivity> shake_distances{
+    1800.0, 1550.0, 1350.0, 1150.0, 1000.0, 875.0, 775.0, 675.0, 600.0, 525.0,
+};
+
 [[nodiscard]] constexpr int sign(const std::int32_t value) noexcept
 {
     return (value > 0) - (value < 0);
 }
 } // namespace
+
+double shake_distance_for_sensitivity(const std::uint32_t sensitivity) noexcept
+{
+    const auto clamped = (std::clamp)(sensitivity, minimum_shake_sensitivity, maximum_shake_sensitivity);
+    return shake_distances[clamped - minimum_shake_sensitivity];
+}
+
+std::uint32_t shake_sensitivity_for_distance(const double minimum_distance) noexcept
+{
+    std::uint32_t closest = default_shake_sensitivity;
+    double closest_difference = std::numeric_limits<double>::infinity();
+    for (std::uint32_t sensitivity = minimum_shake_sensitivity; sensitivity <= maximum_shake_sensitivity; ++sensitivity)
+    {
+        const double difference = std::abs(minimum_distance - shake_distance_for_sensitivity(sensitivity));
+        if (difference < closest_difference)
+        {
+            closest = sensitivity;
+            closest_difference = difference;
+        }
+    }
+    return closest;
+}
 
 ShakeDetector::ShakeDetector(ShakeConfig config) : config_(std::move(config)) {}
 

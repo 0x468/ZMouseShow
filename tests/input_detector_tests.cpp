@@ -265,6 +265,23 @@ void test_default_shake_is_stable_across_polling_rates()
     check(feed_default_shake(high_polling_detector, 16, 0), "default shake triggers with high polling-rate samples");
 }
 
+void test_shake_sensitivity_has_a_stable_monotonic_scale()
+{
+    check(zmouse::input::shake_distance_for_sensitivity(zmouse::input::default_shake_sensitivity) == 1000.0,
+          "default sensitivity preserves the established shake distance");
+    check(zmouse::input::shake_distance_for_sensitivity(1) > zmouse::input::shake_distance_for_sensitivity(10),
+          "higher sensitivity lowers the required shake distance");
+    check(zmouse::input::shake_sensitivity_for_distance(1000.0) == 5,
+          "the default shake distance maps back to sensitivity five");
+    check(zmouse::input::shake_sensitivity_for_distance(700.0) == 8,
+          "a custom distance maps to the nearest sensitivity step");
+    check(zmouse::input::shake_distance_for_sensitivity(0) ==
+                  zmouse::input::shake_distance_for_sensitivity(zmouse::input::minimum_shake_sensitivity) &&
+              zmouse::input::shake_distance_for_sensitivity(99) ==
+                  zmouse::input::shake_distance_for_sensitivity(zmouse::input::maximum_shake_sensitivity),
+          "out-of-range sensitivity values are clamped");
+}
+
 void test_default_shake_rejects_jitter_and_slow_motion()
 {
     zmouse::input::ShakeDetector jitter_detector;
@@ -405,6 +422,7 @@ int main()
     test_single_direction_is_not_a_shake();
     test_reversals_trigger_shake();
     test_default_shake_is_stable_across_polling_rates();
+    test_shake_sensitivity_has_a_stable_monotonic_scale();
     test_default_shake_rejects_jitter_and_slow_motion();
     test_default_shake_cooldown_blocks_repeat_activation();
     test_shake_rearms_after_overlay_session_ends();

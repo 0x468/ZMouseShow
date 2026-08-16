@@ -362,6 +362,8 @@ answer = 42
     zmouse::config::Settings settings;
     settings.shake_enabled = true;
     settings.auto_timeout_enabled = true;
+    settings.idle_timeout_ms = 2'222;
+    settings.maximum_duration_ms = 8'888;
     settings.spotlight_radius_dip = 180;
     settings.spotlight_shape = zmouse::overlay::SpotlightShape::rounded_square;
     settings.dim_opacity_percent = 72;
@@ -375,9 +377,17 @@ answer = 42
     settings.startup_enabled = true;
     settings.double_ctrl.enabled = false;
     settings.double_ctrl.side = zmouse::input::ControlSide::right;
+    settings.double_ctrl.minimum_interval_ms = 150;
+    settings.double_ctrl.maximum_interval_ms = 650;
+    settings.double_ctrl.cooldown_ms = 900;
     settings.hotkey.enabled = true;
     settings.hotkey.key = 'K';
     settings.hotkey.shift = true;
+    settings.shake.interval_ms = 1'200;
+    settings.shake.minimum_distance = 675.0;
+    settings.shake.minimum_path_to_diagonal_ratio = 3.25;
+    settings.shake.minimum_reversals = 5;
+    settings.shake.cooldown_ms = 650;
     check(zmouse::config::persist_basic_settings(path, settings), "basic dialog settings can be persisted");
 
     const auto contents = read_all(path);
@@ -404,6 +414,12 @@ answer = 42
     check(loaded && !loaded->double_ctrl.enabled && loaded->double_ctrl.side == zmouse::input::ControlSide::right &&
               loaded->hotkey.enabled && loaded->hotkey.key == 'K' && loaded->hotkey.shift,
           "persisted trigger settings load back");
+    check(loaded && loaded->idle_timeout_ms == 2'222 && loaded->maximum_duration_ms == 8'888 &&
+              loaded->double_ctrl.minimum_interval_ms == 150 && loaded->double_ctrl.maximum_interval_ms == 650 &&
+              loaded->double_ctrl.cooldown_ms == 900 && loaded->shake.interval_ms == 1'200 &&
+              loaded->shake.minimum_distance == 675.0 && loaded->shake.minimum_path_to_diagonal_ratio == 3.25 &&
+              loaded->shake.minimum_reversals == 5 && loaded->shake.cooldown_ms == 650,
+          "saving the dialog also preserves advanced values needed by a full reset");
     remove_test_file(path);
 }
 

@@ -23,6 +23,13 @@ struct ShakeConfig
     TimestampMs cooldown_ms{800};
 };
 
+inline constexpr std::uint32_t minimum_shake_sensitivity = 1;
+inline constexpr std::uint32_t default_shake_sensitivity = 5;
+inline constexpr std::uint32_t maximum_shake_sensitivity = 10;
+
+[[nodiscard]] double shake_distance_for_sensitivity(std::uint32_t sensitivity) noexcept;
+[[nodiscard]] std::uint32_t shake_sensitivity_for_distance(double minimum_distance) noexcept;
+
 class ShakeDetector final
 {
   public:

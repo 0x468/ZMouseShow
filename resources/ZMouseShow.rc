@@ -12,7 +12,10 @@ BEGIN
     LTEXT           "修改后可立即应用；高级参数仍可在 TOML 中调整。", -1, 12, 10, 306, 12
 
     GROUPBOX        "触发方式（可同时启用）", -1, 8, 28, 314, 132
-    CONTROL         "启用鼠标晃动触发(&S)", IDC_SHAKE_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 42, 140, 14
+    CONTROL         "启用鼠标晃动触发(&S)", IDC_SHAKE_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 42, 138, 14
+    LTEXT           "灵敏度：", -1, 164, 44, 38, 12
+    CONTROL         "", IDC_SHAKE_SENSITIVITY, "msctls_trackbar32", TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 202, 39, 70, 19
+    LTEXT           "", IDC_SHAKE_SENSITIVITY_VALUE, 274, 44, 42, 12
     CONTROL         "启用双击 Ctrl(&C)", IDC_DOUBLE_CTRL_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 62, 140, 14
     LTEXT           "Ctrl 侧(&L)：", -1, 36, 84, 64, 12
     COMBOBOX        IDC_CTRL_SIDE, 103, 81, 88, 70, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
@@ -48,6 +51,7 @@ BEGIN
     LTEXT           "仅填写 EXE 文件名，多个名称用分号分隔。", -1, 92, 360, 216, 10
 
     LTEXT           "“应用”会立即更新当前效果并保存到便携 TOML。", -1, 12, 389, 206, 12
+    PUSHBUTTON      "恢复默认配置(&Z)", IDC_RESTORE_DEFAULTS, 12, 406, 92, 14, WS_TABSTOP
     DEFPUSHBUTTON   "确定", IDOK, 162, 406, 48, 14, WS_TABSTOP
     PUSHBUTTON      "取消", IDCANCEL, 214, 406, 48, 14, WS_TABSTOP
     PUSHBUTTON      "应用(&A)", IDC_APPLY_SETTINGS, 266, 406, 52, 14, WS_DISABLED | WS_TABSTOP
