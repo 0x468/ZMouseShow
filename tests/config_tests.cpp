@@ -465,6 +465,10 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
         .generated_at_utc = "2026-08-15T00:00:00Z",
         .config_path = "C:/portable/ZMouseShow.toml",
         .paused = true,
+        .activation_pending = false,
+        .overlay_visible = true,
+        .tray_menu_open = false,
+        .settings_dialog_open = false,
         .remote_session = false,
         .custom_hotkey_registered = true,
         .startup_registered = true,
@@ -494,6 +498,11 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
           "diagnostics include effective keyboard settings");
     check(report.find("custom_hotkey_registered: true") != std::string::npos,
           "diagnostics distinguish requested and registered custom hotkeys");
+    check(report.find("activation_pending: false") != std::string::npos &&
+              report.find("overlay_visible: true") != std::string::npos &&
+              report.find("tray_menu_open: false") != std::string::npos &&
+              report.find("settings_dialog_open: false") != std::string::npos,
+          "diagnostics expose the non-sensitive runtime state needed to diagnose trigger routing");
     check(report.find("startup_registered: true") != std::string::npos,
           "diagnostics include the effective startup registration state");
     check(report.find("overlay.shape: circle") != std::string::npos,

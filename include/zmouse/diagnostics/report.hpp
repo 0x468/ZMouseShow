@@ -34,6 +34,10 @@ struct Snapshot
     std::string generated_at_utc;
     std::string config_path;
     bool paused{};
+    bool activation_pending{};
+    bool overlay_visible{};
+    bool tray_menu_open{};
+    bool settings_dialog_open{};
     bool remote_session{};
     bool custom_hotkey_registered{};
     bool startup_registered{};

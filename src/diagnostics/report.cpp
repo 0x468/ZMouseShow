@@ -86,6 +86,10 @@ std::string build_report(const Snapshot& snapshot)
            << "generated_at_utc: " << snapshot.generated_at_utc << '\n'
            << "config_path: " << snapshot.config_path << '\n'
            << "paused: " << boolean(snapshot.paused) << '\n'
+           << "activation_pending: " << boolean(snapshot.activation_pending) << '\n'
+           << "overlay_visible: " << boolean(snapshot.overlay_visible) << '\n'
+           << "tray_menu_open: " << boolean(snapshot.tray_menu_open) << '\n'
+           << "settings_dialog_open: " << boolean(snapshot.settings_dialog_open) << '\n'
            << "remote_session: " << boolean(snapshot.remote_session) << '\n'
            << "custom_hotkey_registered: " << boolean(snapshot.custom_hotkey_registered) << '\n'
            << "startup_registered: " << boolean(snapshot.startup_registered) << "\n\n"
