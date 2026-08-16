@@ -39,7 +39,7 @@ cooldown_ms = 500
 
 [hotkey]
 enabled = false
-key = "F12"
+key = "F11"
 control = true
 alt = true
 shift = false

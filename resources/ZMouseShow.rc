@@ -11,7 +11,7 @@ FONT 9, "Segoe UI"
 BEGIN
     LTEXT           "修改后可立即应用；高级参数仍可在 TOML 中调整。", -1, 12, 10, 306, 12
 
-    GROUPBOX        "触发方式", -1, 8, 28, 314, 132
+    GROUPBOX        "触发方式（可同时启用）", -1, 8, 28, 314, 132
     CONTROL         "启用鼠标晃动触发(&S)", IDC_SHAKE_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 42, 140, 14
     CONTROL         "启用双击 Ctrl(&C)", IDC_DOUBLE_CTRL_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 62, 140, 14
     LTEXT           "Ctrl 侧(&L)：", -1, 36, 84, 64, 12

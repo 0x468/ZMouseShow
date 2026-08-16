@@ -46,6 +46,7 @@ zmouse_apply_project_options(zmouse_core)
 
 add_executable(ZMouseShow WIN32
     src/platform/display_simulator.cpp
+    src/platform/global_hotkey_registration.cpp
     src/platform/overlay_manager.cpp
     src/platform/settings_dialog.cpp
     src/platform/win32_main.cpp
@@ -90,6 +91,14 @@ if(BUILD_TESTING)
     target_link_libraries(zmouse_render_tests PRIVATE ZMouseShow::Core)
     zmouse_apply_project_options(zmouse_render_tests)
     add_test(NAME ring_rasterizer COMMAND zmouse_render_tests)
+
+    add_executable(zmouse_global_hotkey_tests
+        src/platform/global_hotkey_registration.cpp
+        tests/global_hotkey_registration_tests.cpp
+    )
+    target_link_libraries(zmouse_global_hotkey_tests PRIVATE ZMouseShow::Core user32)
+    zmouse_apply_project_options(zmouse_global_hotkey_tests)
+    add_test(NAME global_hotkey_registration COMMAND zmouse_global_hotkey_tests)
 
     add_executable(zmouse_render_benchmark
         benchmarks/ring_render_benchmark.cpp

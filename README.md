@@ -40,7 +40,7 @@ On a single-monitor development machine, launch the built executable with `--sim
 - Accepted requirements and architecture decision record
 - VS 2026 / CMake 4.4 / C++23 project baseline
 - Strict double-Ctrl trigger through Raw Input, configurable for left, right, or either side
-- Optional exact custom hotkey (`Ctrl+Alt+F12` by default, disabled until enabled in TOML)
+- Optional exact custom hotkey (`Ctrl+Alt+F11` by default, disabled until enabled in TOML)
 - Optional experimental mouse-shake trigger, disabled by default and available from the tray menu
 - Per-monitor Region overlays with a DPI-aware transparent spotlight and cursor ring
 - 220 ms fade transitions and a contracting pulse ring driven by a tested animation state machine

@@ -104,9 +104,9 @@ void test_right_ctrl_and_either_side_configuration()
 void test_custom_hotkey_requires_an_exact_clean_chord()
 {
     zmouse::input::HotkeyDetector detector(
-        {.enabled = true, .key = 0x7BU, .control = true, .alt = true, .shift = false, .windows = false});
+        {.enabled = true, .key = 0x7AU, .control = true, .alt = true, .shift = false, .windows = false});
     const zmouse::input::HotkeyEvent valid{
-        .key = 0x7BU,
+        .key = 0x7AU,
         .pressed = true,
         .repeated = false,
         .control_down = true,
@@ -115,7 +115,7 @@ void test_custom_hotkey_requires_an_exact_clean_chord()
         .windows_down = false,
         .other_key_down = false,
     };
-    check(detector.process(valid), "the configured Ctrl+Alt+F12 chord triggers");
+    check(detector.process(valid), "the configured Ctrl+Alt+F11 chord triggers");
 
     auto repeated = valid;
     repeated.repeated = true;
@@ -133,9 +133,15 @@ void test_custom_hotkey_requires_an_exact_clean_chord()
 void test_hotkey_safety_validation()
 {
     const auto default_hotkey = zmouse::input::validate_hotkey_config(
-        {.enabled = true, .key = 0x7BU, .control = true, .alt = true, .shift = false, .windows = false});
+        {.enabled = true, .key = 0x7AU, .control = true, .alt = true, .shift = false, .windows = false});
     check(default_hotkey.accepted && !default_hotkey.requires_confirmation,
-          "default Ctrl+Alt+F12 hotkey is accepted without a warning");
+          "default Ctrl+Alt+F11 hotkey is accepted without a warning");
+
+    const auto debugger_reserved = zmouse::input::validate_hotkey_config(
+        {.enabled = true, .key = 0x7BU, .control = true, .alt = true, .shift = false, .windows = false});
+    check(!debugger_reserved.accepted &&
+              debugger_reserved.issue == zmouse::input::HotkeyIssue::reserved_system_shortcut,
+          "F12 is rejected because Windows reserves it for the debugger");
 
     const auto weak_letter = zmouse::input::validate_hotkey_config(
         {.enabled = true, .key = 'S', .control = true, .alt = false, .shift = false, .windows = false});

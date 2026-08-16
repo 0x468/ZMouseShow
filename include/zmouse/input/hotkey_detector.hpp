@@ -7,7 +7,7 @@ namespace zmouse::input
 struct HotkeyConfig
 {
     bool enabled{};
-    std::uint16_t key{0x7BU};
+    std::uint16_t key{0x7AU};
     bool control{true};
     bool alt{true};
     bool shift{};

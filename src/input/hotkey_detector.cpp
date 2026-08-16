@@ -60,6 +60,10 @@ HotkeyValidation validate_hotkey_config(const HotkeyConfig& config) noexcept
     {
         return {.accepted = false, .requires_confirmation = false, .issue = HotkeyIssue::unsupported_key};
     }
+    if (config.key == 0x7BU)
+    {
+        return {.accepted = false, .requires_confirmation = false, .issue = HotkeyIssue::reserved_system_shortcut};
+    }
 
     const auto modifier_count = static_cast<unsigned>(config.control) + static_cast<unsigned>(config.alt) +
                                 static_cast<unsigned>(config.shift) + static_cast<unsigned>(config.windows);

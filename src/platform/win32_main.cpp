@@ -12,6 +12,7 @@
 #include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
+#include "zmouse/platform/global_hotkey_registration.hpp"
 #include <array>
 #include <bitset>
 #include <cstddef>
@@ -44,6 +45,8 @@ constexpr UINT command_settings = 1008;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
 constexpr UINT_PTR overlay_timer_id = 1;
+constexpr int primary_hotkey_id = 0x5A01;
+constexpr int secondary_hotkey_id = 0x5A02;
 constexpr DWORD high_resolution_waitable_timer_flag = 0x00000002;
 constexpr UINT animation_timer_interval_ms = 8;
 constexpr UINT timeout_timer_interval_ms = 50;
@@ -208,6 +211,7 @@ class Application final
 
     ~Application()
     {
+        hotkey_registration_.reset();
         stop_animation_timer();
         if (animation_timer_ != nullptr)
         {
@@ -227,13 +231,25 @@ class Application final
         }
 
         taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
-        if (!create_window() || !overlay_manager_.initialize(instance_) || !register_raw_input() || !add_tray_icon())
+        if (!create_window() || !overlay_manager_.initialize(instance_) || !register_raw_input())
         {
             if (window_ != nullptr)
             {
                 DestroyWindow(window_);
             }
             return 1;
+        }
+
+        const bool hotkey_available = replace_hotkey_registration(settings_.hotkey);
+        if (!add_tray_icon())
+        {
+            DestroyWindow(window_);
+            return 1;
+        }
+        if (!hotkey_available)
+        {
+            show_tray_notification(L"ZMouseShow", L"自定义组合键已被其它程序占用，本次运行已禁用该触发方式。",
+                                   NIIF_WARNING);
         }
 
         if (has_command_line_switch(L"--settings"))
@@ -470,6 +486,47 @@ class Application final
         overlay_manager_.configure(settings.spotlight_radius_dip, settings.dim_opacity_percent);
     }
 
+    [[nodiscard]] bool prepare_hotkey_registration(const zmouse::input::HotkeyConfig& config,
+                                                   zmouse::platform::GlobalHotkeyRegistration& replacement,
+                                                   bool& changed) const noexcept
+    {
+        changed = !hotkey_registration_.matches(config);
+        if (!changed || !config.enabled)
+        {
+            return true;
+        }
+
+        const int replacement_id =
+            hotkey_registration_.identifier() == primary_hotkey_id ? secondary_hotkey_id : primary_hotkey_id;
+        return replacement.acquire(window_, replacement_id, config);
+    }
+
+    void commit_hotkey_registration(zmouse::platform::GlobalHotkeyRegistration&& replacement, const bool changed,
+                                    const zmouse::input::HotkeyConfig& config) noexcept
+    {
+        if (!changed)
+        {
+            return;
+        }
+        hotkey_registration_.reset();
+        if (config.enabled)
+        {
+            hotkey_registration_ = std::move(replacement);
+        }
+    }
+
+    [[nodiscard]] bool replace_hotkey_registration(const zmouse::input::HotkeyConfig& config) noexcept
+    {
+        zmouse::platform::GlobalHotkeyRegistration replacement;
+        bool changed = false;
+        if (!prepare_hotkey_registration(config, replacement, changed))
+        {
+            return false;
+        }
+        commit_hotkey_registration(std::move(replacement), changed, config);
+        return true;
+    }
+
     void reload_configuration() noexcept
     {
         const auto loaded = zmouse::config::load_toml(config_path_);
@@ -479,6 +536,11 @@ class Application final
             return;
         }
 
+        if (!replace_hotkey_registration(loaded->hotkey))
+        {
+            show_tray_notification(L"ZMouseShow", L"新的自定义组合键已被占用，已保留当前设置。", NIIF_WARNING);
+            return;
+        }
         apply_settings(*loaded);
         show_tray_notification(L"ZMouseShow", L"配置已重新加载。", NIIF_INFO);
     }
@@ -525,6 +587,7 @@ class Application final
                 .config_path = wide_to_utf8(config_path_.wstring()),
                 .paused = paused_,
                 .remote_session = GetSystemMetrics(SM_REMOTESESSION) != 0,
+                .custom_hotkey_registered = hotkey_registration_.active(),
                 .virtual_desktop = {virtual_left, virtual_top, virtual_left + GetSystemMetrics(SM_CXVIRTUALSCREEN),
                                     virtual_top + GetSystemMetrics(SM_CYVIRTUALSCREEN)},
                 .monitors = std::move(collection.monitors),
@@ -554,10 +617,17 @@ class Application final
     static bool apply_dialog_settings(void* context, const zmouse::config::Settings& settings) noexcept
     {
         auto& application = *static_cast<Application*>(context);
+        zmouse::platform::GlobalHotkeyRegistration replacement;
+        bool hotkey_changed = false;
+        if (!application.prepare_hotkey_registration(settings.hotkey, replacement, hotkey_changed))
+        {
+            return false;
+        }
         if (!zmouse::config::persist_basic_settings(application.config_path_, settings))
         {
             return false;
         }
+        application.commit_hotkey_registration(std::move(replacement), hotkey_changed, settings.hotkey);
         application.apply_settings(settings);
         return true;
     }
@@ -613,7 +683,7 @@ class Application final
 
     void request_overlay_activation(const bool capture_pressed_keys) noexcept
     {
-        if (activation_pending_ || paused_ || overlay_manager_.visible())
+        if (activation_pending_ || paused_ || settings_dialog_open_ || overlay_manager_.visible())
         {
             return;
         }
@@ -820,6 +890,17 @@ class Application final
             handle_raw_input(reinterpret_cast<HRAWINPUT>(l_param));
             return 0;
 
+        case WM_HOTKEY:
+            if (hotkey_registration_.active() && static_cast<int>(w_param) == hotkey_registration_.identifier())
+            {
+                double_ctrl_detector_.reset();
+                if (registered_hotkey_chord_is_clean())
+                {
+                    request_overlay_activation(true);
+                }
+            }
+            return 0;
+
         case WM_COMMAND:
             switch (LOWORD(w_param))
             {
@@ -885,6 +966,7 @@ class Application final
 
         case WM_DESTROY:
             hide_overlay_immediately();
+            hotkey_registration_.reset();
             remove_tray_icon();
             PostQuitMessage(0);
             return 0;
@@ -968,23 +1050,27 @@ class Application final
             return;
         }
 
-        const zmouse::input::HotkeyEvent hotkey_event{
-            .key = static_cast<std::uint16_t>(keyboard.VKey),
-            .pressed = pressed,
-            .repeated = repeated,
-            .control_down =
-                is_virtual_key_down(VK_CONTROL) || is_virtual_key_down(VK_LCONTROL) || is_virtual_key_down(VK_RCONTROL),
-            .alt_down = is_virtual_key_down(VK_MENU) || is_virtual_key_down(VK_LMENU) || is_virtual_key_down(VK_RMENU),
-            .shift_down =
-                is_virtual_key_down(VK_SHIFT) || is_virtual_key_down(VK_LSHIFT) || is_virtual_key_down(VK_RSHIFT),
-            .windows_down = is_virtual_key_down(VK_LWIN) || is_virtual_key_down(VK_RWIN),
-            .other_key_down = any_other_non_modifier_key_down,
-        };
-        if (hotkey_detector_.process(hotkey_event))
+        if (hotkey_registration_.active())
         {
-            double_ctrl_detector_.reset();
-            request_overlay_activation(true);
-            return;
+            const zmouse::input::HotkeyEvent hotkey_event{
+                .key = static_cast<std::uint16_t>(keyboard.VKey),
+                .pressed = pressed,
+                .repeated = repeated,
+                .control_down = is_virtual_key_down(VK_CONTROL) || is_virtual_key_down(VK_LCONTROL) ||
+                                is_virtual_key_down(VK_RCONTROL),
+                .alt_down =
+                    is_virtual_key_down(VK_MENU) || is_virtual_key_down(VK_LMENU) || is_virtual_key_down(VK_RMENU),
+                .shift_down =
+                    is_virtual_key_down(VK_SHIFT) || is_virtual_key_down(VK_LSHIFT) || is_virtual_key_down(VK_RSHIFT),
+                .windows_down = is_virtual_key_down(VK_LWIN) || is_virtual_key_down(VK_RWIN),
+                .other_key_down = any_other_non_modifier_key_down,
+            };
+            if (hotkey_detector_.process(hotkey_event))
+            {
+                double_ctrl_detector_.reset();
+                request_overlay_activation(true);
+                return;
+            }
         }
 
         const zmouse::input::KeyEvent control_event{
@@ -1004,6 +1090,35 @@ class Application final
     [[nodiscard]] bool is_virtual_key_down(const UINT virtual_key) const noexcept
     {
         return key_down_[virtual_key] || key_down_[virtual_key + 256U];
+    }
+
+    [[nodiscard]] bool registered_hotkey_chord_is_clean() noexcept
+    {
+        const auto key_is_down = [](const int virtual_key) noexcept {
+            return (GetAsyncKeyState(virtual_key) & static_cast<SHORT>(0x8000)) != 0;
+        };
+
+        bool other_key_down = mouse_buttons_ != 0;
+        for (int virtual_key = 1; virtual_key < 0xFF && !other_key_down; ++virtual_key)
+        {
+            if (virtual_key != settings_.hotkey.key && !is_modifier_virtual_key(static_cast<UINT>(virtual_key)) &&
+                key_is_down(virtual_key))
+            {
+                other_key_down = true;
+            }
+        }
+
+        const zmouse::input::HotkeyEvent event{
+            .key = settings_.hotkey.key,
+            .pressed = true,
+            .repeated = false,
+            .control_down = key_is_down(VK_CONTROL) || key_is_down(VK_LCONTROL) || key_is_down(VK_RCONTROL),
+            .alt_down = key_is_down(VK_MENU) || key_is_down(VK_LMENU) || key_is_down(VK_RMENU),
+            .shift_down = key_is_down(VK_SHIFT) || key_is_down(VK_LSHIFT) || key_is_down(VK_RSHIFT),
+            .windows_down = key_is_down(VK_LWIN) || key_is_down(VK_RWIN),
+            .other_key_down = other_key_down,
+        };
+        return hotkey_detector_.process(event);
     }
 
     [[nodiscard]] static bool is_modifier_virtual_key(const UINT virtual_key) noexcept
@@ -1116,6 +1231,7 @@ class Application final
     zmouse::overlay::Point last_cursor_position_{};
     zmouse::input::DoubleCtrlDetector double_ctrl_detector_{};
     zmouse::input::HotkeyDetector hotkey_detector_{};
+    zmouse::platform::GlobalHotkeyRegistration hotkey_registration_{};
     zmouse::input::ShakeDetector shake_detector_{};
     zmouse::overlay::LocatorAnimation locator_animation_{};
     zmouse::platform::OverlayManager overlay_manager_{};
@@ -1138,12 +1254,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS)
     {
-        if (has_command_line_switch(L"--settings"))
+        if (const HWND existing_window = FindWindowW(window_class_name, window_title); existing_window != nullptr)
         {
-            if (const HWND existing_window = FindWindowW(window_class_name, window_title); existing_window != nullptr)
+            if (has_command_line_switch(L"--settings"))
             {
                 static_cast<void>(SetForegroundWindow(existing_window));
                 static_cast<void>(PostMessageW(existing_window, WM_COMMAND, command_settings, 0));
+            }
+            if (has_command_line_switch(L"--diagnostics"))
+            {
+                static_cast<void>(PostMessageW(existing_window, WM_COMMAND, command_export_diagnostics, 0));
             }
         }
         CloseHandle(instance_mutex);

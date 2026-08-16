@@ -35,6 +35,7 @@ struct Snapshot
     std::string config_path;
     bool paused{};
     bool remote_session{};
+    bool custom_hotkey_registered{};
     Rect virtual_desktop{};
     std::vector<Monitor> monitors;
     config::Settings settings{};

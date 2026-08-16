@@ -80,7 +80,7 @@ cooldown_ms = 900
 
 [hotkey]
 enabled = true
-key = "F12"
+key = "F11"
 control = true
 alt = true
 shift = false
@@ -111,7 +111,7 @@ cooldown_ms = 1100
     check(settings->double_ctrl.minimum_interval_ms == 80, "minimum Ctrl interval is parsed");
     check(settings->double_ctrl.maximum_interval_ms == 650, "maximum Ctrl interval is parsed");
     check(settings->double_ctrl.cooldown_ms == 900, "Ctrl cooldown is parsed");
-    check(settings->hotkey.enabled && settings->hotkey.key == 0x7B, "custom hotkey is parsed");
+    check(settings->hotkey.enabled && settings->hotkey.key == 0x7A, "custom hotkey is parsed");
     check(settings->hotkey.control && settings->hotkey.alt && !settings->hotkey.shift && !settings->hotkey.windows,
           "custom hotkey modifiers are parsed");
     check(settings->shake.interval_ms == 1400, "shake interval is parsed");
@@ -164,7 +164,7 @@ minimum_distance = nan
     check(settings->double_ctrl.minimum_interval_ms == 100 && settings->double_ctrl.maximum_interval_ms == 500,
           "an inconsistent Ctrl interval pair resets to defaults");
     check(settings->double_ctrl.side == zmouse::input::ControlSide::left, "an unsupported Ctrl side uses its default");
-    check(settings->hotkey.key == 0x7B, "an unsupported custom hotkey key uses its default");
+    check(settings->hotkey.key == 0x7A, "an unsupported custom hotkey key uses its default");
     check(settings->shake.minimum_distance == 1000.0, "non-finite values use their defaults");
 }
 
@@ -183,17 +183,27 @@ control = true
 alt = true
 )toml");
     check(invalid_key && !invalid_key->hotkey.enabled,
-          "an enabled hotkey with an unsupported key is disabled instead of falling back to F12");
+          "an enabled hotkey with an unsupported key is disabled instead of falling back to F11");
 
     const auto invalid_modifier = zmouse::config::parse_toml(R"toml(
 [hotkey]
 enabled = true
-key = "F12"
+key = "F11"
 control = "yes"
 alt = true
 )toml");
     check(invalid_modifier && !invalid_modifier->hotkey.enabled,
           "an enabled hotkey with a mistyped modifier is disabled as a group");
+
+    const auto reserved_f12 = zmouse::config::parse_toml(R"toml(
+[hotkey]
+enabled = true
+key = "F12"
+control = true
+alt = true
+)toml");
+    check(reserved_f12 && !reserved_f12->hotkey.enabled,
+          "an enabled hotkey using debugger-reserved F12 is disabled as a group");
 }
 
 void test_exported_defaults_round_trip()
@@ -210,7 +220,7 @@ void test_exported_defaults_round_trip()
           "exported overlay defaults round-trip");
     check(settings->double_ctrl.maximum_interval_ms == 500, "exported Ctrl defaults round-trip");
     check(settings->double_ctrl.side == zmouse::input::ControlSide::left, "exported Ctrl side defaults to left");
-    check(!settings->hotkey.enabled && settings->hotkey.key == 0x7B, "exported custom hotkey defaults round-trip");
+    check(!settings->hotkey.enabled && settings->hotkey.key == 0x7A, "exported custom hotkey defaults round-trip");
     check(settings->shake.minimum_reversals == 3, "exported shake defaults round-trip");
 }
 
@@ -344,6 +354,7 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
         .config_path = "C:/portable/ZMouseShow.toml",
         .paused = true,
         .remote_session = false,
+        .custom_hotkey_registered = true,
         .virtual_desktop = {-2560, 0, 2560, 1440},
         .monitors = {{.device_name = "DISPLAY1",
                       .bounds = {-2560, 0, 0, 1440},
@@ -365,6 +376,8 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
           "diagnostics include whether double Ctrl is enabled");
     check(report.find("double_ctrl.side: right") != std::string::npos,
           "diagnostics include effective keyboard settings");
+    check(report.find("custom_hotkey_registered: true") != std::string::npos,
+          "diagnostics distinguish requested and registered custom hotkeys");
     check(report.find("does not contain key history") != std::string::npos,
           "diagnostics explicitly document their privacy boundary");
 

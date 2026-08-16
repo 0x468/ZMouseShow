@@ -58,7 +58,8 @@ std::string build_report(const Snapshot& snapshot)
            << "generated_at_utc: " << snapshot.generated_at_utc << '\n'
            << "config_path: " << snapshot.config_path << '\n'
            << "paused: " << boolean(snapshot.paused) << '\n'
-           << "remote_session: " << boolean(snapshot.remote_session) << "\n\n"
+           << "remote_session: " << boolean(snapshot.remote_session) << '\n'
+           << "custom_hotkey_registered: " << boolean(snapshot.custom_hotkey_registered) << "\n\n"
            << "Display topology\n"
            << "----------------\n"
            << "virtual_desktop: ";
