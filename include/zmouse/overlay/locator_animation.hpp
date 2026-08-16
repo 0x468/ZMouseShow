@@ -17,8 +17,9 @@ enum class AnimationPhase : std::uint8_t
 struct AnimationFrame
 {
     double dim_progress{};
-    double ring_scale{1.0};
-    double ring_opacity{};
+    double focus_opacity{};
+    double ripple_scale{1.0};
+    double ripple_opacity{};
     bool surface_visible{};
     bool needs_more_frames{};
 };
@@ -35,7 +36,7 @@ class LocatorAnimation final
 
   private:
     static constexpr AnimationTimestampMs transition_duration_ms = 180;
-    static constexpr double initial_ring_scale = 2.25;
+    static constexpr double final_ripple_scale = 1.75;
 
     [[nodiscard]] static double progress(AnimationTimestampMs now, AnimationTimestampMs started_at) noexcept;
     [[nodiscard]] static double ease_out(double value) noexcept;
@@ -43,6 +44,6 @@ class LocatorAnimation final
     AnimationPhase phase_{AnimationPhase::hidden};
     AnimationTimestampMs phase_started_at_{};
     double disappearing_start_dim_{1.0};
-    double disappearing_start_ring_opacity_{1.0};
+    double disappearing_start_focus_opacity_{1.0};
 };
 } // namespace zmouse::overlay

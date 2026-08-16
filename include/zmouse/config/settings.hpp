@@ -4,6 +4,7 @@
 #include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/spotlight_shape.hpp"
+#include "zmouse/overlay/visual_effects.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -25,6 +26,7 @@ struct Settings
     input::DoubleCtrlConfig double_ctrl{};
     input::HotkeyConfig hotkey{};
     input::ShakeConfig shake{};
+    overlay::VisualEffects effects{};
 };
 
 [[nodiscard]] std::optional<Settings> parse_toml(std::string_view text) noexcept;

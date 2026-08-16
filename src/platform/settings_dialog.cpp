@@ -186,9 +186,18 @@ class SettingsDialog final
         CheckDlgButton(dialog_, IDC_DOUBLE_CTRL_ENABLED, draft_.double_ctrl.enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_HOTKEY_ENABLED, draft_.hotkey.enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_AUTO_TIMEOUT_ENABLED, draft_.auto_timeout_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_FOCUS_RING_ENABLED,
+                       draft_.effects.focus_ring_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_RIPPLE_ENABLED, draft_.effects.ripple_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_CROSSHAIR_ENABLED, draft_.effects.crosshair_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_ENLARGED_CURSOR_ENABLED,
+                       draft_.effects.enlarged_cursor_enabled ? BST_CHECKED : BST_UNCHECKED);
         EnableWindow(GetDlgItem(dialog_, IDC_CTRL_SIDE), draft_.double_ctrl.enabled ? TRUE : FALSE);
+        EnableWindow(GetDlgItem(dialog_, IDC_CURSOR_SCALE_PERCENT),
+                     draft_.effects.enlarged_cursor_enabled ? TRUE : FALSE);
         SetDlgItemInt(dialog_, IDC_RADIUS_DIP, static_cast<UINT>(draft_.spotlight_radius_dip), FALSE);
         SetDlgItemInt(dialog_, IDC_DIM_OPACITY, draft_.dim_opacity_percent, FALSE);
+        SetDlgItemInt(dialog_, IDC_CURSOR_SCALE_PERCENT, draft_.effects.cursor_scale_percent, FALSE);
 
         set_hotkey_controls(draft_.hotkey);
         set_hotkey_controls_enabled(draft_.hotkey.enabled);
@@ -240,6 +249,11 @@ class SettingsDialog final
             set_hotkey_controls_enabled(enabled);
             update_hotkey_summary();
         }
+        if (control == IDC_ENLARGED_CURSOR_ENABLED && notification == BN_CLICKED)
+        {
+            const bool enabled = IsDlgButtonChecked(dialog_, IDC_ENLARGED_CURSOR_ENABLED) == BST_CHECKED;
+            EnableWindow(GetDlgItem(dialog_, IDC_CURSOR_SCALE_PERCENT), enabled ? TRUE : FALSE);
+        }
         if ((control == IDC_HOTKEY_CAPTURE && notification == EN_CHANGE) ||
             (control == IDC_HOTKEY_WINDOWS && notification == BN_CLICKED))
         {
@@ -249,12 +263,14 @@ class SettingsDialog final
         const bool checkbox_changed =
             notification == BN_CLICKED &&
             (control == IDC_SHAKE_ENABLED || control == IDC_DOUBLE_CTRL_ENABLED || control == IDC_HOTKEY_ENABLED ||
-             control == IDC_HOTKEY_WINDOWS || control == IDC_AUTO_TIMEOUT_ENABLED);
+             control == IDC_HOTKEY_WINDOWS || control == IDC_AUTO_TIMEOUT_ENABLED ||
+             control == IDC_FOCUS_RING_ENABLED || control == IDC_RIPPLE_ENABLED || control == IDC_CROSSHAIR_ENABLED ||
+             control == IDC_ENLARGED_CURSOR_ENABLED);
         const bool combo_changed =
             (control == IDC_CTRL_SIDE || control == IDC_SPOTLIGHT_SHAPE) && notification == CBN_SELCHANGE;
         const bool edit_changed =
-            notification == EN_CHANGE &&
-            (control == IDC_RADIUS_DIP || control == IDC_DIM_OPACITY || control == IDC_HOTKEY_CAPTURE);
+            notification == EN_CHANGE && (control == IDC_RADIUS_DIP || control == IDC_DIM_OPACITY ||
+                                          control == IDC_HOTKEY_CAPTURE || control == IDC_CURSOR_SCALE_PERCENT);
         if (!initializing_ && (checkbox_changed || combo_changed || edit_changed))
         {
             dirty_ = true;
@@ -283,6 +299,15 @@ class SettingsDialog final
             return false;
         }
 
+        BOOL cursor_scale_valid = FALSE;
+        const UINT cursor_scale = GetDlgItemInt(dialog_, IDC_CURSOR_SCALE_PERCENT, &cursor_scale_valid, FALSE);
+        if (cursor_scale_valid == FALSE || cursor_scale < 125 || cursor_scale > 400)
+        {
+            MessageBoxW(dialog_, L"放大光标比例必须是 125–400%。", L"ZMouseShow 设置", MB_OK | MB_ICONWARNING);
+            SetFocus(GetDlgItem(dialog_, IDC_CURSOR_SCALE_PERCENT));
+            return false;
+        }
+
         const LRESULT side = SendDlgItemMessageW(dialog_, IDC_CTRL_SIDE, CB_GETCURSEL, 0, 0);
         const LRESULT shape = SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_GETCURSEL, 0, 0);
         if (side < 0 || side > 2 || shape < 0 || shape > 2)
@@ -308,6 +333,12 @@ class SettingsDialog final
                                    : shape == 1 ? overlay::SpotlightShape::rounded_square
                                                 : overlay::SpotlightShape::diamond;
         settings.dim_opacity_percent = opacity;
+        settings.effects.focus_ring_enabled = IsDlgButtonChecked(dialog_, IDC_FOCUS_RING_ENABLED) == BST_CHECKED;
+        settings.effects.ripple_enabled = IsDlgButtonChecked(dialog_, IDC_RIPPLE_ENABLED) == BST_CHECKED;
+        settings.effects.crosshair_enabled = IsDlgButtonChecked(dialog_, IDC_CROSSHAIR_ENABLED) == BST_CHECKED;
+        settings.effects.enlarged_cursor_enabled =
+            IsDlgButtonChecked(dialog_, IDC_ENLARGED_CURSOR_ENABLED) == BST_CHECKED;
+        settings.effects.cursor_scale_percent = cursor_scale;
         settings.double_ctrl.side = side == 0   ? input::ControlSide::left
                                     : side == 1 ? input::ControlSide::right
                                                 : input::ControlSide::either;

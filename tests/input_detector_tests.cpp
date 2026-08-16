@@ -298,15 +298,22 @@ void test_locator_animation_transitions()
     animation.show(1'000);
     const auto first = animation.frame(1'000);
     check(first.surface_visible && first.needs_more_frames, "show starts an active transition");
-    check(first.dim_progress == 0.0 && first.ring_scale == 2.25, "show starts transparent with a focused ring");
+    check(first.dim_progress == 0.0 && first.focus_opacity == 0.0 && first.ripple_scale == 1.0 &&
+              first.ripple_opacity == 1.0,
+          "show starts with a compact ripple and a transparent focus ring");
 
     const auto middle = animation.frame(1'090);
     check(middle.dim_progress > 0.0 && middle.dim_progress < 1.0, "fade-in progresses over time");
-    check(middle.ring_scale > 1.0 && middle.ring_scale < 2.25, "the pulse ring contracts over time");
+    check(middle.focus_opacity > 0.0 && middle.focus_opacity < 1.0, "the focus ring fades in over time");
+    check(middle.ripple_scale > 1.0 && middle.ripple_scale < 1.75 && middle.ripple_opacity > 0.0 &&
+              middle.ripple_opacity < 1.0,
+          "the ripple expands and fades over time");
 
     const auto shown = animation.frame(1'180);
     check(shown.surface_visible && !shown.needs_more_frames, "fade-in reaches a stable visible state");
-    check(shown.dim_progress == 1.0 && shown.ring_scale == 1.0, "stable frame reaches final opacity and scale");
+    check(shown.dim_progress == 1.0 && shown.focus_opacity == 1.0 && shown.ripple_scale == 1.75 &&
+              shown.ripple_opacity == 0.0,
+          "stable frame keeps the focus ring and retires the ripple");
 
     animation.hide(2'000);
     const auto fading = animation.frame(2'090);

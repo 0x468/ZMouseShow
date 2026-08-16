@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "zmouse/platform/spotlight_region.hpp"
+#include "zmouse/render/cursor_compositor.hpp"
 #include "zmouse/render/ring_rasterizer.hpp"
 #include <algorithm>
 #include <cmath>
@@ -26,12 +27,60 @@ constexpr std::int32_t maximum_animated_ring_radius_px = 768;
         static_cast<std::int32_t>(std::lround(static_cast<double>(base_radius_px) * (std::clamp)(scale, 1.0, 4.0)));
     return (std::clamp)(requested, base_radius_px, (std::max)(base_radius_px, maximum_animated_ring_radius_px));
 }
+
+[[nodiscard]] bool create_dib_surface(const SIZE size, HDC& dc, HBITMAP& bitmap, HGDIOBJ& old_bitmap,
+                                      std::uint32_t*& pixels) noexcept
+{
+    BITMAPINFO bitmap_info{};
+    bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmap_info.bmiHeader.biWidth = size.cx;
+    bitmap_info.bmiHeader.biHeight = -size.cy;
+    bitmap_info.bmiHeader.biPlanes = 1;
+    bitmap_info.bmiHeader.biBitCount = 32;
+    bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+    void* pixel_memory = nullptr;
+    bitmap = CreateDIBSection(nullptr, &bitmap_info, DIB_RGB_COLORS, &pixel_memory, nullptr, 0);
+    dc = CreateCompatibleDC(nullptr);
+    if (bitmap == nullptr || dc == nullptr || pixel_memory == nullptr)
+    {
+        return false;
+    }
+    old_bitmap = SelectObject(dc, bitmap);
+    if (old_bitmap == nullptr || old_bitmap == HGDI_ERROR)
+    {
+        return false;
+    }
+    pixels = static_cast<std::uint32_t*>(pixel_memory);
+    return true;
+}
+
+void destroy_dib_surface(HDC& dc, HBITMAP& bitmap, HGDIOBJ& old_bitmap, std::uint32_t*& pixels) noexcept
+{
+    if (dc != nullptr && old_bitmap != nullptr && old_bitmap != HGDI_ERROR)
+    {
+        static_cast<void>(SelectObject(dc, old_bitmap));
+    }
+    if (bitmap != nullptr)
+    {
+        static_cast<void>(DeleteObject(bitmap));
+    }
+    if (dc != nullptr)
+    {
+        static_cast<void>(DeleteDC(dc));
+    }
+    dc = nullptr;
+    bitmap = nullptr;
+    old_bitmap = nullptr;
+    pixels = nullptr;
+}
 } // namespace
 
 OverlayManager::~OverlayManager()
 {
     destroy_windows();
     destroy_ring_bitmap();
+    destroy_cursor_bitmap();
     if (ring_class_ != 0)
     {
         UnregisterClassW(ring_class_name, instance_);
@@ -43,13 +92,15 @@ OverlayManager::~OverlayManager()
 }
 
 void OverlayManager::configure(const std::int32_t spotlight_radius_dip, const overlay::SpotlightShape spotlight_shape,
-                               const std::uint32_t dim_opacity_percent) noexcept
+                               const overlay::VisualEffects& effects, const std::uint32_t dim_opacity_percent) noexcept
 {
     spotlight_radius_dip_ = (std::clamp)(spotlight_radius_dip, 32, 512);
     spotlight_shape_ = spotlight_shape;
+    effects_ = effects;
     const auto opacity = (std::clamp)(dim_opacity_percent, 10U, 90U);
     dim_alpha_ = static_cast<BYTE>((opacity * 255U + 50U) / 100U);
     destroy_ring_bitmap();
+    destroy_cursor_bitmap();
 
     apply_dim_progress();
 
@@ -79,7 +130,7 @@ bool OverlayManager::rebuild()
     destroy_windows();
 
     if (EnumDisplayMonitors(nullptr, nullptr, enum_monitor_proc, reinterpret_cast<LPARAM>(this)) == FALSE ||
-        overlays_.empty() || !create_ring_window())
+        overlays_.empty() || !create_ring_window() || !create_cursor_window())
     {
         destroy_windows();
         return false;
@@ -95,7 +146,7 @@ bool OverlayManager::rebuild()
 bool OverlayManager::show_at(const overlay::Point cursor)
 {
     const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(cursor));
-    if (!ensure_ring_bitmap(radius_px, ring_scale_))
+    if (!ensure_ring_bitmap(radius_px, ripple_scale_))
     {
         return false;
     }
@@ -117,7 +168,7 @@ bool OverlayManager::show_at(const overlay::Point cursor)
                                        RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN));
     }
 
-    if (!update_ring_position(cursor))
+    if (!update_ring_position(cursor) || !update_cursor_position(cursor))
     {
         hide();
         return false;
@@ -136,7 +187,7 @@ void OverlayManager::move_to(const overlay::Point cursor)
     }
 
     const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(cursor));
-    if (!ensure_ring_bitmap(radius_px, ring_scale_))
+    if (!ensure_ring_bitmap(radius_px, ripple_scale_))
     {
         hide();
         return;
@@ -152,17 +203,19 @@ void OverlayManager::move_to(const overlay::Point cursor)
     }
 
     last_cursor_ = cursor;
-    if (!update_ring_position(cursor))
+    if (!update_ring_position(cursor) || !update_cursor_position(cursor))
     {
         hide();
     }
 }
 
-void OverlayManager::set_animation_frame(const double dim_progress, const double ring_scale, const double ring_opacity)
+void OverlayManager::set_animation_frame(const double dim_progress, const double focus_opacity,
+                                         const double ripple_scale, const double ripple_opacity)
 {
     dim_progress_ = (std::clamp)(dim_progress, 0.0, 1.0);
-    ring_scale_ = (std::clamp)(ring_scale, 1.0, 4.0);
-    ring_opacity_ = (std::clamp)(ring_opacity, 0.0, 1.0);
+    focus_opacity_ = (std::clamp)(focus_opacity, 0.0, 1.0);
+    ripple_scale_ = (std::clamp)(ripple_scale, 1.0, 2.0);
+    ripple_opacity_ = (std::clamp)(ripple_opacity, 0.0, 1.0);
     apply_dim_progress();
 
     if (!visible_)
@@ -171,7 +224,8 @@ void OverlayManager::set_animation_frame(const double dim_progress, const double
     }
 
     const auto radius_px = overlay::dip_to_pixels(spotlight_radius_dip_, dpi_at(last_cursor_));
-    if (!ensure_ring_bitmap(radius_px, ring_scale_) || !update_ring_position(last_cursor_))
+    if (!ensure_ring_bitmap(radius_px, ripple_scale_) || !update_ring_position(last_cursor_) ||
+        !update_cursor_position(last_cursor_))
     {
         hide();
     }
@@ -182,6 +236,10 @@ void OverlayManager::hide() noexcept
     if (ring_window_ != nullptr)
     {
         ShowWindow(ring_window_, SW_HIDE);
+    }
+    if (cursor_window_ != nullptr)
+    {
+        ShowWindow(cursor_window_, SW_HIDE);
     }
     for (const auto& overlay : overlays_)
     {
@@ -299,6 +357,14 @@ bool OverlayManager::create_ring_window()
     return ring_window_ != nullptr;
 }
 
+bool OverlayManager::create_cursor_window()
+{
+    cursor_window_ =
+        CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT, ring_class_name,
+                        nullptr, WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance_, nullptr);
+    return cursor_window_ != nullptr;
+}
+
 bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::Point cursor,
                                 const std::int32_t radius_px)
 {
@@ -345,21 +411,28 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
 
 bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const double scale)
 {
-    const auto visual_radius = animated_ring_radius(base_radius_px, scale);
+    const auto ripple_radius = effects_.ripple_enabled ? animated_ring_radius(base_radius_px, scale) : 0;
     const auto margin = (std::max)(1, ring_margin_dip * base_radius_px / spotlight_radius_dip_);
     const auto stroke = (std::max)(2, ring_stroke_dip * base_radius_px / spotlight_radius_dip_);
-    const auto extent = visual_radius + margin;
-    const SIZE requested_size{.cx = extent * 2, .cy = extent * 2};
+    const auto ripple_stroke = (std::max)(2, stroke * 2 / 3);
+    const auto crosshair_arm = (std::max)(8, base_radius_px / 4);
+    const auto crosshair_gap = (std::max)(4, base_radius_px / 14);
+    const auto crosshair_thickness = (std::max)(2, stroke / 2);
+    const auto focus_alpha =
+        effects_.focus_ring_enabled ? static_cast<std::uint8_t>(std::lround(focus_opacity_ * 235.0)) : std::uint8_t{};
+    const auto ripple_alpha =
+        effects_.ripple_enabled ? static_cast<std::uint8_t>(std::lround(ripple_opacity_ * 180.0)) : std::uint8_t{};
+    const auto crosshair_alpha =
+        effects_.crosshair_enabled ? static_cast<std::uint8_t>(std::lround(focus_opacity_ * 220.0)) : std::uint8_t{};
 
-    const bool settled_at_base_radius = scale <= 1.0;
     const auto maximum_visual_radius =
-        settled_at_base_radius ? visual_radius : animated_ring_radius(base_radius_px, 4.0);
+        effects_.ripple_enabled ? animated_ring_radius(base_radius_px, 1.75) : base_radius_px;
     const auto capacity_extent = maximum_visual_radius + margin;
     const SIZE required_capacity{.cx = capacity_extent * 2, .cy = capacity_extent * 2};
+    const auto active_extent = ripple_alpha > 0 ? capacity_extent : base_radius_px + margin;
+    const SIZE requested_size{.cx = active_extent * 2, .cy = active_extent * 2};
     if (ring_bitmap_ == nullptr || ring_base_radius_px_ != base_radius_px ||
-        ring_bitmap_capacity_.cx < required_capacity.cx || ring_bitmap_capacity_.cy < required_capacity.cy ||
-        (settled_at_base_radius &&
-         (ring_bitmap_capacity_.cx != required_capacity.cx || ring_bitmap_capacity_.cy != required_capacity.cy)))
+        ring_bitmap_capacity_.cx < required_capacity.cx || ring_bitmap_capacity_.cy < required_capacity.cy)
     {
         destroy_ring_bitmap();
 
@@ -395,7 +468,9 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const
                     0U);
     }
 
-    if (ring_visual_radius_px_ == visual_radius && ring_stroke_px_ == stroke && ring_size_.cx == requested_size.cx &&
+    if (painted_ripple_radius_px_ == ripple_radius && ring_stroke_px_ == stroke &&
+        painted_focus_alpha_ == focus_alpha && painted_ripple_alpha_ == ripple_alpha &&
+        painted_crosshair_alpha_ == crosshair_alpha && ring_size_.cx == requested_size.cx &&
         ring_size_.cy == requested_size.cy)
     {
         return true;
@@ -408,23 +483,53 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const
         .height = ring_bitmap_capacity_.cy,
         .stride = ring_bitmap_capacity_.cx,
     };
-    if (ring_visual_radius_px_ > 0 &&
-        !zmouse::render::paint_antialiased_ring(surface, ring_size_.cx, ring_size_.cy, ring_visual_radius_px_,
-                                                ring_stroke_px_, 0))
+    if (painted_crosshair_alpha_ > 0 &&
+        !zmouse::render::paint_crosshair(surface, ring_size_.cx, ring_size_.cy, crosshair_arm, crosshair_gap,
+                                         crosshair_thickness, 0))
     {
         destroy_ring_bitmap();
         return false;
     }
-    if (!zmouse::render::paint_antialiased_ring(surface, requested_size.cx, requested_size.cy, visual_radius, stroke,
-                                                235))
+    if (painted_focus_alpha_ > 0 && !zmouse::render::paint_antialiased_ring(surface, ring_size_.cx, ring_size_.cy,
+                                                                            base_radius_px, ring_stroke_px_, 0))
+    {
+        destroy_ring_bitmap();
+        return false;
+    }
+    if (painted_ripple_alpha_ > 0 && painted_ripple_radius_px_ > 0 &&
+        !zmouse::render::paint_antialiased_ring(surface, ring_size_.cx, ring_size_.cy, painted_ripple_radius_px_,
+                                                (std::max)(2, ring_stroke_px_ * 2 / 3), 0))
+    {
+        destroy_ring_bitmap();
+        return false;
+    }
+
+    if (ripple_alpha > 0 && !zmouse::render::paint_antialiased_ring(surface, requested_size.cx, requested_size.cy,
+                                                                    ripple_radius, ripple_stroke, ripple_alpha))
+    {
+        destroy_ring_bitmap();
+        return false;
+    }
+    if (focus_alpha > 0 && !zmouse::render::paint_antialiased_ring(surface, requested_size.cx, requested_size.cy,
+                                                                   base_radius_px, stroke, focus_alpha))
+    {
+        destroy_ring_bitmap();
+        return false;
+    }
+    if (crosshair_alpha > 0 &&
+        !zmouse::render::paint_crosshair(surface, requested_size.cx, requested_size.cy, crosshair_arm, crosshair_gap,
+                                         crosshair_thickness, crosshair_alpha))
     {
         destroy_ring_bitmap();
         return false;
     }
 
     ring_size_ = requested_size;
-    ring_visual_radius_px_ = visual_radius;
+    painted_ripple_radius_px_ = ripple_radius;
     ring_stroke_px_ = stroke;
+    painted_focus_alpha_ = focus_alpha;
+    painted_ripple_alpha_ = ripple_alpha;
+    painted_crosshair_alpha_ = crosshair_alpha;
     return true;
 }
 
@@ -441,7 +546,7 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) const noe
     BLENDFUNCTION blend{
         .BlendOp = AC_SRC_OVER,
         .BlendFlags = 0,
-        .SourceConstantAlpha = static_cast<BYTE>(std::lround(ring_opacity_ * 255.0)),
+        .SourceConstantAlpha = 255,
         .AlphaFormat = AC_SRC_ALPHA,
     };
     if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_dc_, &source, 0, &blend, ULW_ALPHA) ==
@@ -451,6 +556,157 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) const noe
     }
 
     return SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+}
+
+bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)
+{
+    CURSORINFO cursor_info{.cbSize = sizeof(CURSORINFO)};
+    if (GetCursorInfo(&cursor_info) == FALSE || (cursor_info.flags & CURSOR_SHOWING) == 0 ||
+        cursor_info.hCursor == nullptr)
+    {
+        cursor_drawable_ = false;
+        return true;
+    }
+
+    const auto scale_percent = (std::clamp)(effects_.cursor_scale_percent, 125U, 400U);
+    if (cursor_bitmap_ != nullptr && rendered_cursor_ == cursor_info.hCursor && rendered_cursor_dpi_ == dpi &&
+        rendered_cursor_scale_percent_ == scale_percent)
+    {
+        cursor_drawable_ = true;
+        return true;
+    }
+
+    ICONINFO icon_info{};
+    if (GetIconInfo(cursor_info.hCursor, &icon_info) == FALSE)
+    {
+        return false;
+    }
+
+    LONG base_width = 0;
+    LONG base_height = 0;
+    BITMAP bitmap_details{};
+    if (icon_info.hbmColor != nullptr &&
+        GetObjectW(icon_info.hbmColor, sizeof(bitmap_details), &bitmap_details) == sizeof(bitmap_details))
+    {
+        base_width = bitmap_details.bmWidth;
+        base_height = bitmap_details.bmHeight;
+    }
+    else if (icon_info.hbmMask != nullptr &&
+             GetObjectW(icon_info.hbmMask, sizeof(bitmap_details), &bitmap_details) == sizeof(bitmap_details))
+    {
+        base_width = bitmap_details.bmWidth;
+        base_height = bitmap_details.bmHeight / 2;
+    }
+    if (icon_info.hbmColor != nullptr)
+    {
+        static_cast<void>(DeleteObject(icon_info.hbmColor));
+    }
+    if (icon_info.hbmMask != nullptr)
+    {
+        static_cast<void>(DeleteObject(icon_info.hbmMask));
+    }
+
+    if (base_width <= 0 || base_height <= 0)
+    {
+        base_width = GetSystemMetricsForDpi(SM_CXCURSOR, dpi);
+        base_height = GetSystemMetricsForDpi(SM_CYCURSOR, dpi);
+    }
+    const SIZE target_size{
+        .cx = (std::max)(1, MulDiv(base_width, static_cast<int>(scale_percent), 100)),
+        .cy = (std::max)(1, MulDiv(base_height, static_cast<int>(scale_percent), 100)),
+    };
+
+    destroy_cursor_bitmap();
+    if (!create_dib_surface(target_size, cursor_dc_, cursor_bitmap_, cursor_old_bitmap_, cursor_pixels_))
+    {
+        destroy_cursor_bitmap();
+        return false;
+    }
+
+    HDC black_dc = nullptr;
+    HBITMAP black_bitmap = nullptr;
+    HGDIOBJ black_old_bitmap = nullptr;
+    std::uint32_t* black_pixels = nullptr;
+    HDC white_dc = nullptr;
+    HBITMAP white_bitmap = nullptr;
+    HGDIOBJ white_old_bitmap = nullptr;
+    std::uint32_t* white_pixels = nullptr;
+    if (!create_dib_surface(target_size, black_dc, black_bitmap, black_old_bitmap, black_pixels) ||
+        !create_dib_surface(target_size, white_dc, white_bitmap, white_old_bitmap, white_pixels))
+    {
+        destroy_dib_surface(black_dc, black_bitmap, black_old_bitmap, black_pixels);
+        destroy_dib_surface(white_dc, white_bitmap, white_old_bitmap, white_pixels);
+        destroy_cursor_bitmap();
+        return false;
+    }
+
+    const auto pixel_count = static_cast<std::size_t>(target_size.cx) * static_cast<std::size_t>(target_size.cy);
+    std::fill_n(black_pixels, pixel_count, 0x00000000U);
+    std::fill_n(white_pixels, pixel_count, 0x00FFFFFFU);
+    const bool drawn =
+        DrawIconEx(black_dc, 0, 0, cursor_info.hCursor, target_size.cx, target_size.cy, 0, nullptr, DI_NORMAL) !=
+            FALSE &&
+        DrawIconEx(white_dc, 0, 0, cursor_info.hCursor, target_size.cx, target_size.cy, 0, nullptr, DI_NORMAL) != FALSE;
+    const bool composed = drawn && zmouse::render::compose_cursor_images(std::span(black_pixels, pixel_count),
+                                                                         std::span(white_pixels, pixel_count),
+                                                                         std::span(cursor_pixels_, pixel_count));
+    destroy_dib_surface(black_dc, black_bitmap, black_old_bitmap, black_pixels);
+    destroy_dib_surface(white_dc, white_bitmap, white_old_bitmap, white_pixels);
+    if (!composed)
+    {
+        destroy_cursor_bitmap();
+        return false;
+    }
+
+    cursor_size_ = target_size;
+    cursor_hotspot_ = {
+        MulDiv(static_cast<int>(icon_info.xHotspot), static_cast<int>(scale_percent), 100),
+        MulDiv(static_cast<int>(icon_info.yHotspot), static_cast<int>(scale_percent), 100),
+    };
+    rendered_cursor_ = cursor_info.hCursor;
+    rendered_cursor_dpi_ = dpi;
+    rendered_cursor_scale_percent_ = scale_percent;
+    cursor_drawable_ = true;
+    return true;
+}
+
+bool OverlayManager::update_cursor_position(const overlay::Point cursor)
+{
+    if (cursor_window_ == nullptr)
+    {
+        return false;
+    }
+    if (!effects_.enlarged_cursor_enabled)
+    {
+        ShowWindow(cursor_window_, SW_HIDE);
+        return true;
+    }
+    if (!ensure_cursor_bitmap(dpi_at(cursor)))
+    {
+        return false;
+    }
+    if (!cursor_drawable_)
+    {
+        ShowWindow(cursor_window_, SW_HIDE);
+        return true;
+    }
+
+    POINT destination{cursor.x - cursor_hotspot_.x, cursor.y - cursor_hotspot_.y};
+    POINT source{};
+    SIZE size = cursor_size_;
+    BLENDFUNCTION blend{
+        .BlendOp = AC_SRC_OVER,
+        .BlendFlags = 0,
+        .SourceConstantAlpha = static_cast<BYTE>(std::lround(focus_opacity_ * 255.0)),
+        .AlphaFormat = AC_SRC_ALPHA,
+    };
+    if (UpdateLayeredWindow(cursor_window_, nullptr, &destination, &size, cursor_dc_, &source, 0, &blend, ULW_ALPHA) ==
+        FALSE)
+    {
+        return false;
+    }
+    return SetWindowPos(cursor_window_, HWND_TOPMOST, 0, 0, 0, 0,
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
 }
 
@@ -479,6 +735,11 @@ void OverlayManager::apply_dim_progress() const noexcept
 
 void OverlayManager::destroy_windows() noexcept
 {
+    if (cursor_window_ != nullptr)
+    {
+        DestroyWindow(cursor_window_);
+        cursor_window_ = nullptr;
+    }
     if (ring_window_ != nullptr)
     {
         DestroyWindow(ring_window_);
@@ -514,7 +775,21 @@ void OverlayManager::destroy_ring_bitmap() noexcept
     ring_bitmap_capacity_ = {};
     ring_size_ = {};
     ring_base_radius_px_ = 0;
-    ring_visual_radius_px_ = 0;
+    painted_ripple_radius_px_ = 0;
     ring_stroke_px_ = 0;
+    painted_focus_alpha_ = 0;
+    painted_ripple_alpha_ = 0;
+    painted_crosshair_alpha_ = 0;
+}
+
+void OverlayManager::destroy_cursor_bitmap() noexcept
+{
+    destroy_dib_surface(cursor_dc_, cursor_bitmap_, cursor_old_bitmap_, cursor_pixels_);
+    cursor_size_ = {};
+    cursor_hotspot_ = {};
+    rendered_cursor_ = nullptr;
+    rendered_cursor_dpi_ = 0;
+    rendered_cursor_scale_percent_ = 0;
+    cursor_drawable_ = false;
 }
 } // namespace zmouse::platform

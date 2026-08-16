@@ -89,6 +89,22 @@ void test_invalid_surfaces_are_rejected()
           "active width beyond capacity is rejected");
     check(!zmouse::render::paint_antialiased_ring(surface, 4, 4, 0, 2, 235), "zero radius is rejected");
     check(!zmouse::render::paint_antialiased_ring(surface, 4, 4, 2, 0, 235), "zero stroke is rejected");
+    check(!zmouse::render::paint_crosshair(surface, 4, 4, 0, 1, 1, 235), "zero-length crosshair is rejected");
+}
+
+void test_crosshair_has_a_clear_center_and_four_arms()
+{
+    constexpr std::int32_t size = 32;
+    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(size * size));
+    const zmouse::render::PixelSurface surface{.pixels = pixels, .width = size, .height = size, .stride = size};
+    check(zmouse::render::paint_crosshair(surface, size, size, 6, 3, 2, 220), "valid crosshair is drawn");
+    const auto at = [&](const std::int32_t x, const std::int32_t y)
+    { return pixels[static_cast<std::size_t>(y * size + x)]; };
+    check(at(16, 16) == 0U, "crosshair center remains clear for the cursor");
+    check(at(8, 16) != 0U && at(24, 16) != 0U && at(16, 8) != 0U && at(16, 24) != 0U, "crosshair paints all four arms");
+    check(zmouse::render::paint_crosshair(surface, size, size, 6, 3, 2, 0), "crosshair can be erased");
+    check(std::ranges::all_of(pixels, [](const std::uint32_t pixel) { return pixel == 0U; }),
+          "erasing the crosshair restores transparency");
 }
 
 void test_optimized_raster_matches_the_legacy_pixels()
@@ -113,6 +129,7 @@ int main()
 {
     test_ring_is_drawn_and_erased_without_touching_capacity_padding();
     test_invalid_surfaces_are_rejected();
+    test_crosshair_has_a_clear_center_and_four_arms();
     test_optimized_raster_matches_the_legacy_pixels();
 
     if (failures == 0)

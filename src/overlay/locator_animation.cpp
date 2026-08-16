@@ -9,7 +9,7 @@ void LocatorAnimation::show(const AnimationTimestampMs now) noexcept
     phase_ = AnimationPhase::appearing;
     phase_started_at_ = now;
     disappearing_start_dim_ = 1.0;
-    disappearing_start_ring_opacity_ = 1.0;
+    disappearing_start_focus_opacity_ = 1.0;
 }
 
 void LocatorAnimation::hide(const AnimationTimestampMs now) noexcept
@@ -21,7 +21,7 @@ void LocatorAnimation::hide(const AnimationTimestampMs now) noexcept
 
     const auto current = frame(now);
     disappearing_start_dim_ = current.dim_progress;
-    disappearing_start_ring_opacity_ = current.ring_opacity;
+    disappearing_start_focus_opacity_ = current.focus_opacity;
     phase_ = AnimationPhase::disappearing;
     phase_started_at_ = now;
 }
@@ -31,7 +31,7 @@ void LocatorAnimation::reset() noexcept
     phase_ = AnimationPhase::hidden;
     phase_started_at_ = 0;
     disappearing_start_dim_ = 1.0;
-    disappearing_start_ring_opacity_ = 1.0;
+    disappearing_start_focus_opacity_ = 1.0;
 }
 
 AnimationFrame LocatorAnimation::frame(const AnimationTimestampMs now) noexcept
@@ -49,22 +49,25 @@ AnimationFrame LocatorAnimation::frame(const AnimationTimestampMs now) noexcept
         {
             phase_ = AnimationPhase::visible;
             return {.dim_progress = 1.0,
-                    .ring_scale = 1.0,
-                    .ring_opacity = 1.0,
+                    .focus_opacity = 1.0,
+                    .ripple_scale = final_ripple_scale,
+                    .ripple_opacity = 0.0,
                     .surface_visible = true,
                     .needs_more_frames = false};
         }
         return {.dim_progress = eased,
-                .ring_scale = 1.0 + (initial_ring_scale - 1.0) * (1.0 - eased),
-                .ring_opacity = 1.0,
+                .focus_opacity = eased,
+                .ripple_scale = 1.0 + (final_ripple_scale - 1.0) * eased,
+                .ripple_opacity = 1.0 - eased,
                 .surface_visible = true,
                 .needs_more_frames = true};
     }
 
     case AnimationPhase::visible:
         return {.dim_progress = 1.0,
-                .ring_scale = 1.0,
-                .ring_opacity = 1.0,
+                .focus_opacity = 1.0,
+                .ripple_scale = final_ripple_scale,
+                .ripple_opacity = 0.0,
                 .surface_visible = true,
                 .needs_more_frames = false};
 
@@ -78,8 +81,9 @@ AnimationFrame LocatorAnimation::frame(const AnimationTimestampMs now) noexcept
         }
         const double remaining = 1.0 - ease_out(linear);
         return {.dim_progress = disappearing_start_dim_ * remaining,
-                .ring_scale = 1.0,
-                .ring_opacity = disappearing_start_ring_opacity_ * remaining,
+                .focus_opacity = disappearing_start_focus_opacity_ * remaining,
+                .ripple_scale = final_ripple_scale,
+                .ripple_opacity = 0.0,
                 .surface_visible = true,
                 .needs_more_frames = true};
     }

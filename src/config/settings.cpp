@@ -27,6 +27,13 @@ radius_dip = 120
 shape = "circle"
 dim_opacity_percent = 60
 
+[effects]
+focus_ring_enabled = true
+ripple_enabled = true
+crosshair_enabled = false
+enlarged_cursor_enabled = false
+cursor_scale_percent = 200
+
 [timeout]
 idle_ms = 1200
 maximum_duration_ms = 5000
@@ -205,6 +212,27 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
     {
         assign_integer(*timeout, "idle_ms", settings.idle_timeout_ms, 100, 60'000);
         assign_integer(*timeout, "maximum_duration_ms", settings.maximum_duration_ms, 500, 600'000);
+    }
+
+    if (const auto* effects = document["effects"].as_table())
+    {
+        if (const auto value = (*effects)["focus_ring_enabled"].value<bool>())
+        {
+            settings.effects.focus_ring_enabled = *value;
+        }
+        if (const auto value = (*effects)["ripple_enabled"].value<bool>())
+        {
+            settings.effects.ripple_enabled = *value;
+        }
+        if (const auto value = (*effects)["crosshair_enabled"].value<bool>())
+        {
+            settings.effects.crosshair_enabled = *value;
+        }
+        if (const auto value = (*effects)["enlarged_cursor_enabled"].value<bool>())
+        {
+            settings.effects.enlarged_cursor_enabled = *value;
+        }
+        assign_integer(*effects, "cursor_scale_percent", settings.effects.cursor_scale_percent, 125, 400);
     }
 
     const auto default_double_ctrl = input::DoubleCtrlConfig{};
@@ -762,6 +790,15 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
         updated = patch_value(updated, "overlay", "shape",
                               '"' + std::string(spotlight_shape_name(settings.spotlight_shape)) + '"');
         updated = patch_value(updated, "overlay", "dim_opacity_percent", std::to_string(settings.dim_opacity_percent));
+        updated = patch_value(updated, "effects", "focus_ring_enabled",
+                              settings.effects.focus_ring_enabled ? "true" : "false");
+        updated = patch_value(updated, "effects", "ripple_enabled", settings.effects.ripple_enabled ? "true" : "false");
+        updated =
+            patch_value(updated, "effects", "crosshair_enabled", settings.effects.crosshair_enabled ? "true" : "false");
+        updated = patch_value(updated, "effects", "enlarged_cursor_enabled",
+                              settings.effects.enlarged_cursor_enabled ? "true" : "false");
+        updated = patch_value(updated, "effects", "cursor_scale_percent",
+                              std::to_string(settings.effects.cursor_scale_percent));
         if (updated.size() > maximum_config_size)
         {
             return false;
@@ -777,7 +814,12 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
             verified->hotkey.shift != settings.hotkey.shift || verified->hotkey.windows != settings.hotkey.windows ||
             verified->spotlight_radius_dip != settings.spotlight_radius_dip ||
             verified->spotlight_shape != settings.spotlight_shape ||
-            verified->dim_opacity_percent != settings.dim_opacity_percent)
+            verified->dim_opacity_percent != settings.dim_opacity_percent ||
+            verified->effects.focus_ring_enabled != settings.effects.focus_ring_enabled ||
+            verified->effects.ripple_enabled != settings.effects.ripple_enabled ||
+            verified->effects.crosshair_enabled != settings.effects.crosshair_enabled ||
+            verified->effects.enlarged_cursor_enabled != settings.effects.enlarged_cursor_enabled ||
+            verified->effects.cursor_scale_percent != settings.effects.cursor_scale_percent)
         {
             return false;
         }

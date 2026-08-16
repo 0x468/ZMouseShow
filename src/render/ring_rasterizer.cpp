@@ -93,4 +93,45 @@ bool paint_antialiased_ring(const PixelSurface& surface, const std::int32_t acti
     }
     return true;
 }
+
+bool paint_crosshair(const PixelSurface& surface, const std::int32_t active_width, const std::int32_t active_height,
+                     const std::int32_t arm_length, const std::int32_t center_gap, const std::int32_t thickness,
+                     const std::uint8_t maximum_alpha) noexcept
+{
+    if (!valid_surface(surface, active_width, active_height) || arm_length <= 0 || center_gap < 0 || thickness <= 0)
+    {
+        return false;
+    }
+
+    const auto pixel = static_cast<std::uint32_t>(maximum_alpha) << 24U |
+                       static_cast<std::uint32_t>(maximum_alpha) << 16U |
+                       static_cast<std::uint32_t>(maximum_alpha) << 8U | static_cast<std::uint32_t>(maximum_alpha);
+    const std::int32_t center_x = active_width / 2;
+    const std::int32_t center_y = active_height / 2;
+    const std::int32_t half_thickness = thickness / 2;
+
+    const auto fill = [&](const std::int32_t left, const std::int32_t top, const std::int32_t right,
+                          const std::int32_t bottom) noexcept
+    {
+        const auto clipped_left = (std::clamp)(left, 0, active_width);
+        const auto clipped_top = (std::clamp)(top, 0, active_height);
+        const auto clipped_right = (std::clamp)(right, 0, active_width);
+        const auto clipped_bottom = (std::clamp)(bottom, 0, active_height);
+        for (std::int32_t y = clipped_top; y < clipped_bottom; ++y)
+        {
+            auto* row = surface.pixels.data() + static_cast<std::size_t>(y * surface.stride);
+            std::fill(row + clipped_left, row + clipped_right, pixel);
+        }
+    };
+
+    fill(center_x - center_gap - arm_length, center_y - half_thickness, center_x - center_gap,
+         center_y - half_thickness + thickness);
+    fill(center_x + center_gap + 1, center_y - half_thickness, center_x + center_gap + arm_length + 1,
+         center_y - half_thickness + thickness);
+    fill(center_x - half_thickness, center_y - center_gap - arm_length, center_x - half_thickness + thickness,
+         center_y - center_gap);
+    fill(center_x - half_thickness, center_y + center_gap + 1, center_x - half_thickness + thickness,
+         center_y + center_gap + arm_length + 1);
+    return true;
+}
 } // namespace zmouse::render

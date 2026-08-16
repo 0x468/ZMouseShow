@@ -483,7 +483,7 @@ class Application final
         double_ctrl_detector_.configure(settings.double_ctrl);
         hotkey_detector_.configure(settings.hotkey);
         shake_detector_.configure(settings.shake);
-        overlay_manager_.configure(settings.spotlight_radius_dip, settings.spotlight_shape,
+        overlay_manager_.configure(settings.spotlight_radius_dip, settings.spotlight_shape, settings.effects,
                                    settings.dim_opacity_percent);
     }
 
@@ -664,8 +664,8 @@ class Application final
         const ULONGLONG now = GetTickCount64();
         locator_animation_.show(now);
         const auto initial_frame = locator_animation_.frame(now);
-        overlay_manager_.set_animation_frame(initial_frame.dim_progress, initial_frame.ring_scale,
-                                             initial_frame.ring_opacity);
+        overlay_manager_.set_animation_frame(initial_frame.dim_progress, initial_frame.focus_opacity,
+                                             initial_frame.ripple_scale, initial_frame.ripple_opacity);
         if (!overlay_manager_.show_at(position))
         {
             locator_animation_.reset();
@@ -716,7 +716,8 @@ class Application final
         const ULONGLONG now = GetTickCount64();
         locator_animation_.hide(now);
         const auto frame = locator_animation_.frame(now);
-        overlay_manager_.set_animation_frame(frame.dim_progress, frame.ring_scale, frame.ring_opacity);
+        overlay_manager_.set_animation_frame(frame.dim_progress, frame.focus_opacity, frame.ripple_scale,
+                                             frame.ripple_opacity);
         suppressed_key_releases_.reset();
         pending_trigger_key_releases_.reset();
         double_ctrl_detector_.reset();
@@ -859,7 +860,8 @@ class Application final
             hide_overlay_immediately();
             return;
         }
-        overlay_manager_.set_animation_frame(frame.dim_progress, frame.ring_scale, frame.ring_opacity);
+        overlay_manager_.set_animation_frame(frame.dim_progress, frame.focus_opacity, frame.ripple_scale,
+                                             frame.ripple_opacity);
         if (!overlay_manager_.visible())
         {
             hide_overlay_immediately();

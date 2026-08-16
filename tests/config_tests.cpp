@@ -69,6 +69,13 @@ radius_dip = 180
 shape = "diamond"
 dim_opacity_percent = 72
 
+[effects]
+focus_ring_enabled = false
+ripple_enabled = false
+crosshair_enabled = true
+enlarged_cursor_enabled = true
+cursor_scale_percent = 250
+
 [timeout]
 idle_ms = 2500
 maximum_duration_ms = 12000
@@ -107,6 +114,10 @@ cooldown_ms = 1100
     check(settings->spotlight_radius_dip == 180, "spotlight radius is parsed");
     check(settings->spotlight_shape == zmouse::overlay::SpotlightShape::diamond, "spotlight shape is parsed");
     check(settings->dim_opacity_percent == 72, "dim opacity is parsed");
+    check(!settings->effects.focus_ring_enabled && !settings->effects.ripple_enabled &&
+              settings->effects.crosshair_enabled && settings->effects.enlarged_cursor_enabled &&
+              settings->effects.cursor_scale_percent == 250,
+          "visual effect options are parsed");
     check(settings->idle_timeout_ms == 2500, "idle timeout is parsed");
     check(settings->maximum_duration_ms == 12000, "maximum duration is parsed");
     check(settings->double_ctrl.side == zmouse::input::ControlSide::right, "Ctrl side is parsed");
@@ -134,6 +145,10 @@ unknown_key = 42
 radius_dip = 4096
 shape = "hexagon"
 dim_opacity_percent = -1
+
+[effects]
+focus_ring_enabled = "yes"
+cursor_scale_percent = 9999
 
 [timeout]
 idle_ms = "not-a-number"
@@ -164,6 +179,8 @@ minimum_distance = nan
     check(settings->spotlight_shape == zmouse::overlay::SpotlightShape::circle,
           "an unsupported spotlight shape uses its default");
     check(settings->dim_opacity_percent == 60, "out-of-range opacity uses its default");
+    check(settings->effects.focus_ring_enabled && settings->effects.cursor_scale_percent == 200,
+          "invalid visual effect fields use their defaults");
     check(settings->idle_timeout_ms == 1200, "a wrong-type timeout uses its default");
     check(settings->maximum_duration_ms == 5000, "out-of-range duration uses its default");
     check(settings->double_ctrl.minimum_interval_ms == 100 && settings->double_ctrl.maximum_interval_ms == 500,
@@ -225,6 +242,10 @@ void test_exported_defaults_round_trip()
               settings->spotlight_shape == zmouse::overlay::SpotlightShape::circle &&
               settings->dim_opacity_percent == 60,
           "exported overlay defaults round-trip");
+    check(settings->effects.focus_ring_enabled && settings->effects.ripple_enabled &&
+              !settings->effects.crosshair_enabled && !settings->effects.enlarged_cursor_enabled &&
+              settings->effects.cursor_scale_percent == 200,
+          "exported visual effect defaults round-trip");
     check(settings->double_ctrl.maximum_interval_ms == 500, "exported Ctrl defaults round-trip");
     check(settings->double_ctrl.side == zmouse::input::ControlSide::left, "exported Ctrl side defaults to left");
     check(!settings->hotkey.enabled && settings->hotkey.key == 0x7A, "exported custom hotkey defaults round-trip");
@@ -297,6 +318,9 @@ radius_dip = 120 # keep radius comment
 shape = "circle"
 dim_opacity_percent = 60
 
+[effects]
+focus_ring_enabled = true
+
 [double_ctrl]
 minimum_interval_ms = 100
 
@@ -314,6 +338,11 @@ answer = 42
     settings.spotlight_radius_dip = 180;
     settings.spotlight_shape = zmouse::overlay::SpotlightShape::rounded_square;
     settings.dim_opacity_percent = 72;
+    settings.effects.focus_ring_enabled = false;
+    settings.effects.ripple_enabled = false;
+    settings.effects.crosshair_enabled = true;
+    settings.effects.enlarged_cursor_enabled = true;
+    settings.effects.cursor_scale_percent = 275;
     settings.double_ctrl.enabled = false;
     settings.double_ctrl.side = zmouse::input::ControlSide::right;
     settings.hotkey.enabled = true;
@@ -332,6 +361,10 @@ answer = 42
               loaded->spotlight_shape == zmouse::overlay::SpotlightShape::rounded_square &&
               loaded->dim_opacity_percent == 72,
           "persisted overlay settings load back");
+    check(loaded && !loaded->effects.focus_ring_enabled && !loaded->effects.ripple_enabled &&
+              loaded->effects.crosshair_enabled && loaded->effects.enlarged_cursor_enabled &&
+              loaded->effects.cursor_scale_percent == 275,
+          "persisted visual effect settings load back");
     check(loaded && !loaded->double_ctrl.enabled && loaded->double_ctrl.side == zmouse::input::ControlSide::right &&
               loaded->hotkey.enabled && loaded->hotkey.key == 'K' && loaded->hotkey.shift,
           "persisted trigger settings load back");
@@ -391,6 +424,9 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
           "diagnostics distinguish requested and registered custom hotkeys");
     check(report.find("overlay.shape: circle") != std::string::npos,
           "diagnostics report the effective spotlight shape");
+    check(report.find("effects.ripple_enabled: true") != std::string::npos &&
+              report.find("effects.cursor_scale_percent: 200") != std::string::npos,
+          "diagnostics report visual effect options");
     check(report.find("does not contain key history") != std::string::npos,
           "diagnostics explicitly document their privacy boundary");
 
