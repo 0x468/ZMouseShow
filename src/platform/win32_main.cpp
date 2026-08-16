@@ -12,6 +12,7 @@
 #include "zmouse/diagnostics/report.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/hotkey_detector.hpp"
+#include "zmouse/input/overlay_input_rules.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
 #include "zmouse/platform/global_hotkey_registration.hpp"
@@ -406,13 +407,83 @@ class Application final
         static_cast<void>(Shell_NotifyIconW(NIM_MODIFY, &notification));
     }
 
+    [[nodiscard]] zmouse::input::OverlayInputState input_state() const noexcept
+    {
+        return {
+            .paused = paused_,
+            .activation_pending = activation_pending_,
+            .overlay_visible = overlay_manager_.visible(),
+            .tray_menu_open = tray_menu_open_,
+            .settings_dialog_open = settings_dialog_open_,
+        };
+    }
+
+    void synchronize_input_state() noexcept
+    {
+        const auto key_is_down = [](const int virtual_key) noexcept
+        { return (GetAsyncKeyState(virtual_key) & static_cast<SHORT>(0x8000)) != 0; };
+
+        key_down_.reset();
+        for (std::size_t virtual_key = 1; virtual_key < 0xFFU; ++virtual_key)
+        {
+            if (virtual_key == VK_LBUTTON || virtual_key == VK_RBUTTON || virtual_key == VK_MBUTTON ||
+                virtual_key == VK_XBUTTON1 || virtual_key == VK_XBUTTON2 || virtual_key == VK_SHIFT ||
+                virtual_key == VK_LSHIFT || virtual_key == VK_RSHIFT || virtual_key == VK_CONTROL ||
+                virtual_key == VK_LCONTROL || virtual_key == VK_RCONTROL || virtual_key == VK_MENU ||
+                virtual_key == VK_LMENU || virtual_key == VK_RMENU)
+            {
+                continue;
+            }
+            key_down_.set(virtual_key, key_is_down(static_cast<int>(virtual_key)));
+        }
+        key_down_.set(VK_SHIFT, key_is_down(VK_SHIFT));
+        key_down_.set(VK_CONTROL, key_is_down(VK_LCONTROL));
+        key_down_.set(VK_CONTROL + 256U, key_is_down(VK_RCONTROL));
+        key_down_.set(VK_MENU, key_is_down(VK_LMENU));
+        key_down_.set(VK_MENU + 256U, key_is_down(VK_RMENU));
+
+        mouse_buttons_ = 0;
+        if (key_is_down(VK_LBUTTON))
+        {
+            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_left);
+        }
+        if (key_is_down(VK_RBUTTON))
+        {
+            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_right);
+        }
+        if (key_is_down(VK_MBUTTON))
+        {
+            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_middle);
+        }
+        if (key_is_down(VK_XBUTTON1))
+        {
+            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_x1);
+        }
+        if (key_is_down(VK_XBUTTON2))
+        {
+            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_x2);
+        }
+
+        double_ctrl_detector_.reset();
+        shake_detector_.reset();
+        shake_detector_.on_mouse_buttons_changed(mouse_buttons_ != 0);
+    }
+
     void show_tray_menu() noexcept
     {
+        if (tray_menu_open_)
+        {
+            return;
+        }
+
         HMENU menu = CreatePopupMenu();
         if (menu == nullptr)
         {
             return;
         }
+
+        tray_menu_open_ = true;
+        hide_overlay_immediately();
 
         static_cast<void>(AppendMenuW(menu, MF_STRING, command_settings, L"设置(&O)..."));
         static_cast<void>(AppendMenuW(menu, MF_SEPARATOR, 0, nullptr));
@@ -435,6 +506,8 @@ class Application final
         static_cast<void>(TrackPopupMenuEx(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_LEFTALIGN, cursor.x, cursor.y,
                                            window_, nullptr));
         static_cast<void>(DestroyMenu(menu));
+        tray_menu_open_ = false;
+        synchronize_input_state();
     }
 
     void toggle_pause() noexcept
@@ -667,13 +740,13 @@ class Application final
         static_cast<void>(
             zmouse::platform::show_settings_dialog(instance_, nullptr, settings_, apply_dialog_settings, this));
         settings_dialog_open_ = false;
+        synchronize_input_state();
     }
 
     void activate_overlay() noexcept
     {
-        if (paused_ || overlay_manager_.visible())
+        if (!zmouse::input::triggers_armed(input_state()))
         {
-            pending_trigger_key_releases_.reset();
             return;
         }
 
@@ -698,17 +771,14 @@ class Application final
         overlay_started_at_ = now;
         last_cursor_move_at_ = now;
         last_cursor_position_ = position;
-        suppressed_key_releases_ = pending_trigger_key_releases_;
-        pending_trigger_key_releases_.reset();
         double_ctrl_detector_.reset();
         shake_detector_.reset();
         schedule_overlay_timer();
     }
 
-    void request_overlay_activation(const bool capture_pressed_keys,
-                                    const zmouse::policy::TriggerSource source) noexcept
+    void request_overlay_activation(const zmouse::policy::TriggerSource source) noexcept
     {
-        if (activation_pending_ || paused_ || settings_dialog_open_ || overlay_manager_.visible())
+        if (!zmouse::input::triggers_armed(input_state()))
         {
             return;
         }
@@ -718,19 +788,10 @@ class Application final
             return;
         }
 
-        if (capture_pressed_keys)
-        {
-            pending_trigger_key_releases_ = key_down_;
-        }
-        else
-        {
-            pending_trigger_key_releases_.reset();
-        }
         activation_pending_ = true;
         if (PostMessageW(window_, message_activate, 0, 0) == FALSE)
         {
             activation_pending_ = false;
-            pending_trigger_key_releases_.reset();
         }
     }
 
@@ -747,8 +808,6 @@ class Application final
         const auto frame = locator_animation_.frame(now);
         overlay_manager_.set_animation_frame(frame.dim_progress, frame.focus_opacity, frame.ripple_scale,
                                              frame.ripple_opacity);
-        suppressed_key_releases_.reset();
-        pending_trigger_key_releases_.reset();
         double_ctrl_detector_.reset();
         shake_detector_.reset();
         schedule_overlay_timer();
@@ -756,12 +815,11 @@ class Application final
 
     void hide_overlay_immediately() noexcept
     {
+        activation_pending_ = false;
         overlay_manager_.hide();
         locator_animation_.reset();
         stop_animation_timer();
         static_cast<void>(KillTimer(window_, overlay_timer_id));
-        suppressed_key_releases_.reset();
-        pending_trigger_key_releases_.reset();
         double_ctrl_detector_.reset();
         shake_detector_.reset();
     }
@@ -926,9 +984,9 @@ class Application final
             if (hotkey_registration_.active() && static_cast<int>(w_param) == hotkey_registration_.identifier())
             {
                 double_ctrl_detector_.reset();
-                if (registered_hotkey_chord_is_clean())
+                if (zmouse::input::triggers_armed(input_state()) && registered_hotkey_chord_is_clean())
                 {
-                    request_overlay_activation(true, zmouse::policy::TriggerSource::custom_hotkey);
+                    request_overlay_activation(zmouse::policy::TriggerSource::custom_hotkey);
                 }
             }
             return 0;
@@ -973,6 +1031,10 @@ class Application final
             return 0;
 
         case message_activate:
+            if (!activation_pending_)
+            {
+                return 0;
+            }
             activation_pending_ = false;
             activate_overlay();
             return 0;
@@ -1052,16 +1114,9 @@ class Application final
         const bool right_control = keyboard.VKey == VK_RCONTROL || (keyboard.VKey == VK_CONTROL && extended);
 
         const bool overlay_was_visible = overlay_manager_.visible();
-        if (overlay_was_visible && !repeated)
+        if (zmouse::input::should_dismiss_overlay_for_key_event(overlay_was_visible, pressed, repeated))
         {
-            if (!pressed && suppressed_key_releases_.test(key_id))
-            {
-                suppressed_key_releases_.reset(key_id);
-            }
-            else
-            {
-                dismiss_overlay();
-            }
+            dismiss_overlay();
         }
 
         bool any_other_key_down = false;
@@ -1077,7 +1132,7 @@ class Application final
             }
         }
 
-        if (paused_ || overlay_was_visible)
+        if (!zmouse::input::triggers_armed(input_state()))
         {
             return;
         }
@@ -1100,7 +1155,7 @@ class Application final
             if (hotkey_detector_.process(hotkey_event))
             {
                 double_ctrl_detector_.reset();
-                request_overlay_activation(true, zmouse::policy::TriggerSource::custom_hotkey);
+                request_overlay_activation(zmouse::policy::TriggerSource::custom_hotkey);
                 return;
             }
         }
@@ -1115,7 +1170,7 @@ class Application final
         };
         if (double_ctrl_detector_.process(control_event, any_other_key_down, mouse_buttons_ != 0))
         {
-            request_overlay_activation(true, zmouse::policy::TriggerSource::double_ctrl);
+            request_overlay_activation(zmouse::policy::TriggerSource::double_ctrl);
         }
     }
 
@@ -1207,7 +1262,7 @@ class Application final
             update_overlay_cursor();
         }
 
-        if (overlay_was_visible || activation_pending_ || paused_ || !shake_enabled_ ||
+        if (!zmouse::input::triggers_armed(input_state()) || !shake_enabled_ ||
             (mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0)
         {
             return;
@@ -1220,7 +1275,7 @@ class Application final
         };
         if (shake_detector_.process(movement, false))
         {
-            request_overlay_activation(false, zmouse::policy::TriggerSource::mouse_shake);
+            request_overlay_activation(zmouse::policy::TriggerSource::mouse_shake);
         }
     }
 
@@ -1247,10 +1302,9 @@ class Application final
     bool paused_{};
     bool shake_enabled_{};
     bool auto_timeout_enabled_{};
+    bool tray_menu_open_{};
     bool settings_dialog_open_{};
     std::bitset<512> key_down_{};
-    std::bitset<512> suppressed_key_releases_{};
-    std::bitset<512> pending_trigger_key_releases_{};
     bool activation_pending_{};
     HANDLE animation_timer_{};
     bool animation_timer_running_{};

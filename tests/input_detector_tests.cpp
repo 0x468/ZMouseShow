@@ -1,5 +1,6 @@
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/hotkey_detector.hpp"
+#include "zmouse/input/overlay_input_rules.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/geometry.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
@@ -19,6 +20,32 @@ void check(const bool condition, const std::string_view description)
         std::cerr << "FAILED: " << description << '\n';
         ++failures;
     }
+}
+
+void test_overlay_trigger_routing_state_matrix()
+{
+    using zmouse::input::OverlayInputState;
+    using zmouse::input::triggers_armed;
+
+    check(triggers_armed({}), "triggers are armed while the application is idle");
+    check(!triggers_armed(OverlayInputState{.paused = true}), "pause blocks all triggers");
+    check(!triggers_armed(OverlayInputState{.activation_pending = true}),
+          "a pending activation blocks duplicate triggers");
+    check(!triggers_armed(OverlayInputState{.overlay_visible = true}), "a visible overlay blocks overlapping triggers");
+    check(!triggers_armed(OverlayInputState{.tray_menu_open = true}), "the tray menu blocks all triggers");
+    check(!triggers_armed(OverlayInputState{.settings_dialog_open = true}), "the settings dialog blocks all triggers");
+}
+
+void test_overlay_key_release_does_not_dismiss()
+{
+    using zmouse::input::should_dismiss_overlay_for_key_event;
+
+    check(!should_dismiss_overlay_for_key_event(true, false, false),
+          "releasing a trigger key does not dismiss the overlay");
+    check(!should_dismiss_overlay_for_key_event(true, true, true), "a repeated key press does not dismiss the overlay");
+    check(should_dismiss_overlay_for_key_event(true, true, false), "a new key press dismisses the visible overlay");
+    check(!should_dismiss_overlay_for_key_event(false, true, false),
+          "keyboard input does not request dismissal while the overlay is hidden");
 }
 
 void test_clean_double_ctrl_triggers()
@@ -267,6 +294,15 @@ void test_default_shake_cooldown_blocks_repeat_activation()
     check(feed_default_shake(detector, 8, 1, 1'500), "a new shake triggers after the default cooldown");
 }
 
+void test_shake_rearms_after_overlay_session_ends()
+{
+    zmouse::input::ShakeDetector detector;
+    check(feed_default_shake(detector, 8, 1, 100), "a shake can start the first overlay session");
+    detector.reset();
+    check(feed_default_shake(detector, 8, 1, 300),
+          "ending the overlay session rearms shake detection without toggling the setting");
+}
+
 void test_mouse_buttons_clear_shake_history()
 {
     auto detector = make_test_shake_detector();
@@ -356,6 +392,8 @@ void test_overlay_geometry_handles_negative_monitor_coordinates()
 
 int main()
 {
+    test_overlay_trigger_routing_state_matrix();
+    test_overlay_key_release_does_not_dismiss();
     test_clean_double_ctrl_triggers();
     test_disabled_double_ctrl_never_starts_a_candidate();
     test_ctrl_chords_cancel_candidate();
@@ -369,6 +407,7 @@ int main()
     test_default_shake_is_stable_across_polling_rates();
     test_default_shake_rejects_jitter_and_slow_motion();
     test_default_shake_cooldown_blocks_repeat_activation();
+    test_shake_rearms_after_overlay_session_ends();
     test_mouse_buttons_clear_shake_history();
     test_active_overlay_blocks_and_clears_shake_history();
     test_locator_animation_transitions();
