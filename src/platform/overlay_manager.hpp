@@ -58,9 +58,12 @@ class OverlayManager final
     HDC ring_dc_{};
     HBITMAP ring_bitmap_{};
     HGDIOBJ ring_old_bitmap_{};
+    std::uint32_t* ring_pixels_{};
+    SIZE ring_bitmap_capacity_{};
     SIZE ring_size_{};
     std::int32_t ring_base_radius_px_{};
     std::int32_t ring_visual_radius_px_{};
+    std::int32_t ring_stroke_px_{};
     std::int32_t spotlight_radius_dip_{120};
     BYTE dim_alpha_{153};
     double dim_progress_{1.0};

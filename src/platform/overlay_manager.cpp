@@ -2,10 +2,12 @@
 
 #include <windows.h>
 
+#include "zmouse/render/ring_rasterizer.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace zmouse::platform
 {
@@ -16,6 +18,13 @@ constexpr wchar_t ring_class_name[] = L"ZMouseShow.CursorRing";
 constexpr std::int32_t ring_margin_dip = 18;
 constexpr std::int32_t ring_stroke_dip = 5;
 constexpr std::int32_t maximum_animated_ring_radius_px = 768;
+
+[[nodiscard]] std::int32_t animated_ring_radius(const std::int32_t base_radius_px, const double scale) noexcept
+{
+    const auto requested =
+        static_cast<std::int32_t>(std::lround(static_cast<double>(base_radius_px) * (std::clamp)(scale, 1.0, 4.0)));
+    return (std::clamp)(requested, base_radius_px, (std::max)(base_radius_px, maximum_animated_ring_radius_px));
+}
 } // namespace
 
 OverlayManager::~OverlayManager()
@@ -334,60 +343,86 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
 
 bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const double scale)
 {
-    const auto requested_radius =
-        static_cast<std::int32_t>(std::lround(static_cast<double>(base_radius_px) * (std::clamp)(scale, 1.0, 4.0)));
-    const auto visual_radius =
-        (std::clamp)(requested_radius, base_radius_px, (std::max)(base_radius_px, maximum_animated_ring_radius_px));
-    if (ring_bitmap_ != nullptr && ring_base_radius_px_ == base_radius_px && ring_visual_radius_px_ == visual_radius)
+    const auto visual_radius = animated_ring_radius(base_radius_px, scale);
+    const auto margin = (std::max)(1, ring_margin_dip * base_radius_px / spotlight_radius_dip_);
+    const auto stroke = (std::max)(2, ring_stroke_dip * base_radius_px / spotlight_radius_dip_);
+    const auto extent = visual_radius + margin;
+    const SIZE requested_size{.cx = extent * 2, .cy = extent * 2};
+
+    const bool settled_at_base_radius = scale <= 1.0;
+    const auto maximum_visual_radius =
+        settled_at_base_radius ? visual_radius : animated_ring_radius(base_radius_px, 4.0);
+    const auto capacity_extent = maximum_visual_radius + margin;
+    const SIZE required_capacity{.cx = capacity_extent * 2, .cy = capacity_extent * 2};
+    if (ring_bitmap_ == nullptr || ring_base_radius_px_ != base_radius_px ||
+        ring_bitmap_capacity_.cx < required_capacity.cx || ring_bitmap_capacity_.cy < required_capacity.cy ||
+        (settled_at_base_radius &&
+         (ring_bitmap_capacity_.cx != required_capacity.cx || ring_bitmap_capacity_.cy != required_capacity.cy)))
+    {
+        destroy_ring_bitmap();
+
+        BITMAPINFO bitmap_info{};
+        bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bitmap_info.bmiHeader.biWidth = required_capacity.cx;
+        bitmap_info.bmiHeader.biHeight = -required_capacity.cy;
+        bitmap_info.bmiHeader.biPlanes = 1;
+        bitmap_info.bmiHeader.biBitCount = 32;
+        bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+        void* pixel_memory = nullptr;
+        ring_bitmap_ = CreateDIBSection(nullptr, &bitmap_info, DIB_RGB_COLORS, &pixel_memory, nullptr, 0);
+        ring_dc_ = CreateCompatibleDC(nullptr);
+        if (ring_bitmap_ == nullptr || ring_dc_ == nullptr || pixel_memory == nullptr)
+        {
+            destroy_ring_bitmap();
+            return false;
+        }
+        const HGDIOBJ old_bitmap = SelectObject(ring_dc_, ring_bitmap_);
+        if (old_bitmap == nullptr || old_bitmap == HGDI_ERROR)
+        {
+            destroy_ring_bitmap();
+            return false;
+        }
+        ring_old_bitmap_ = old_bitmap;
+
+        ring_pixels_ = static_cast<std::uint32_t*>(pixel_memory);
+        ring_bitmap_capacity_ = required_capacity;
+        ring_base_radius_px_ = base_radius_px;
+        std::fill_n(ring_pixels_,
+                    static_cast<std::size_t>(required_capacity.cx) * static_cast<std::size_t>(required_capacity.cy),
+                    0U);
+    }
+
+    if (ring_visual_radius_px_ == visual_radius && ring_stroke_px_ == stroke && ring_size_.cx == requested_size.cx &&
+        ring_size_.cy == requested_size.cy)
     {
         return true;
     }
 
-    destroy_ring_bitmap();
-    const auto margin = (std::max)(1, ring_margin_dip * base_radius_px / spotlight_radius_dip_);
-    const auto stroke = (std::max)(2, ring_stroke_dip * base_radius_px / spotlight_radius_dip_);
-    const auto extent = visual_radius + margin;
-    ring_size_ = {.cx = extent * 2, .cy = extent * 2};
-
-    BITMAPINFO bitmap_info{};
-    bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bitmap_info.bmiHeader.biWidth = ring_size_.cx;
-    bitmap_info.bmiHeader.biHeight = -ring_size_.cy;
-    bitmap_info.bmiHeader.biPlanes = 1;
-    bitmap_info.bmiHeader.biBitCount = 32;
-    bitmap_info.bmiHeader.biCompression = BI_RGB;
-
-    void* pixel_memory = nullptr;
-    ring_bitmap_ = CreateDIBSection(nullptr, &bitmap_info, DIB_RGB_COLORS, &pixel_memory, nullptr, 0);
-    ring_dc_ = CreateCompatibleDC(nullptr);
-    if (ring_bitmap_ == nullptr || ring_dc_ == nullptr || pixel_memory == nullptr)
+    const zmouse::render::PixelSurface surface{
+        .pixels = std::span(ring_pixels_, static_cast<std::size_t>(ring_bitmap_capacity_.cx) *
+                                              static_cast<std::size_t>(ring_bitmap_capacity_.cy)),
+        .width = ring_bitmap_capacity_.cx,
+        .height = ring_bitmap_capacity_.cy,
+        .stride = ring_bitmap_capacity_.cx,
+    };
+    if (ring_visual_radius_px_ > 0 &&
+        !zmouse::render::paint_antialiased_ring(surface, ring_size_.cx, ring_size_.cy, ring_visual_radius_px_,
+                                                ring_stroke_px_, 0))
     {
         destroy_ring_bitmap();
         return false;
     }
-    ring_old_bitmap_ = SelectObject(ring_dc_, ring_bitmap_);
-
-    auto* pixels = static_cast<std::uint32_t*>(pixel_memory);
-    const auto center = static_cast<double>(extent) - 0.5;
-    const auto half_stroke = static_cast<double>(stroke) / 2.0;
-    for (LONG y = 0; y < ring_size_.cy; ++y)
+    if (!zmouse::render::paint_antialiased_ring(surface, requested_size.cx, requested_size.cy, visual_radius, stroke,
+                                                235))
     {
-        for (LONG x = 0; x < ring_size_.cx; ++x)
-        {
-            const auto dx = static_cast<double>(x) - center;
-            const auto dy = static_cast<double>(y) - center;
-            const auto distance = std::hypot(dx, dy);
-            const auto coverage = (std::clamp)(half_stroke + 1.0 - std::abs(distance - visual_radius), 0.0, 1.0);
-            const auto alpha = static_cast<std::uint8_t>(coverage * 235.0);
-            pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(ring_size_.cx) +
-                   static_cast<std::size_t>(x)] =
-                static_cast<std::uint32_t>(alpha) << 24U | static_cast<std::uint32_t>(alpha) << 16U |
-                static_cast<std::uint32_t>(alpha) << 8U | static_cast<std::uint32_t>(alpha);
-        }
+        destroy_ring_bitmap();
+        return false;
     }
 
-    ring_base_radius_px_ = base_radius_px;
+    ring_size_ = requested_size;
     ring_visual_radius_px_ = visual_radius;
+    ring_stroke_px_ = stroke;
     return true;
 }
 
@@ -473,8 +508,11 @@ void OverlayManager::destroy_ring_bitmap() noexcept
     ring_dc_ = nullptr;
     ring_bitmap_ = nullptr;
     ring_old_bitmap_ = nullptr;
+    ring_pixels_ = nullptr;
+    ring_bitmap_capacity_ = {};
     ring_size_ = {};
     ring_base_radius_px_ = 0;
     ring_visual_radius_px_ = 0;
+    ring_stroke_px_ = 0;
 }
 } // namespace zmouse::platform

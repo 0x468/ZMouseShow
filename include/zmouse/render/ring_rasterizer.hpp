@@ -1,0 +1,19 @@
+#pragma once
+
+#include <cstdint>
+#include <span>
+
+namespace zmouse::render
+{
+struct PixelSurface
+{
+    std::span<std::uint32_t> pixels;
+    std::int32_t width{};
+    std::int32_t height{};
+    std::int32_t stride{};
+};
+
+[[nodiscard]] bool paint_antialiased_ring(const PixelSurface& surface, std::int32_t active_width,
+                                          std::int32_t active_height, std::int32_t radius, std::int32_t stroke_width,
+                                          std::uint8_t maximum_alpha) noexcept;
+} // namespace zmouse::render

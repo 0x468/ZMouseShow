@@ -30,6 +30,7 @@ add_library(zmouse_core STATIC
     src/input/hotkey_detector.cpp
     src/input/shake_detector.cpp
     src/overlay/locator_animation.cpp
+    src/render/ring_rasterizer.cpp
 )
 add_library(ZMouseShow::Core ALIAS zmouse_core)
 
@@ -81,4 +82,17 @@ if(BUILD_TESTING)
     target_link_libraries(zmouse_config_tests PRIVATE ZMouseShow::Core)
     zmouse_apply_project_options(zmouse_config_tests)
     add_test(NAME configuration COMMAND zmouse_config_tests)
+
+    add_executable(zmouse_render_tests
+        tests/ring_rasterizer_tests.cpp
+    )
+    target_link_libraries(zmouse_render_tests PRIVATE ZMouseShow::Core)
+    zmouse_apply_project_options(zmouse_render_tests)
+    add_test(NAME ring_rasterizer COMMAND zmouse_render_tests)
+
+    add_executable(zmouse_render_benchmark
+        benchmarks/ring_render_benchmark.cpp
+    )
+    target_link_libraries(zmouse_render_benchmark PRIVATE ZMouseShow::Core)
+    zmouse_apply_project_options(zmouse_render_benchmark)
 endif()
