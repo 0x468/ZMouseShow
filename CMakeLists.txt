@@ -49,6 +49,7 @@ add_executable(ZMouseShow WIN32
     src/platform/global_hotkey_registration.cpp
     src/platform/overlay_manager.cpp
     src/platform/settings_dialog.cpp
+    src/platform/spotlight_region.cpp
     src/platform/win32_main.cpp
     resources/ZMouseShow.rc
     resources/ZMouseShow.manifest
@@ -99,6 +100,14 @@ if(BUILD_TESTING)
     target_link_libraries(zmouse_global_hotkey_tests PRIVATE ZMouseShow::Core user32)
     zmouse_apply_project_options(zmouse_global_hotkey_tests)
     add_test(NAME global_hotkey_registration COMMAND zmouse_global_hotkey_tests)
+
+    add_executable(zmouse_spotlight_region_tests
+        src/platform/spotlight_region.cpp
+        tests/spotlight_region_tests.cpp
+    )
+    target_link_libraries(zmouse_spotlight_region_tests PRIVATE ZMouseShow::Core gdi32)
+    zmouse_apply_project_options(zmouse_spotlight_region_tests)
+    add_test(NAME spotlight_regions COMMAND zmouse_spotlight_region_tests)
 
     add_executable(zmouse_render_benchmark
         benchmarks/ring_render_benchmark.cpp

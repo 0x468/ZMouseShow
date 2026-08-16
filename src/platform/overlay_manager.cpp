@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include "zmouse/platform/spotlight_region.hpp"
 #include "zmouse/render/ring_rasterizer.hpp"
 #include <algorithm>
 #include <cmath>
@@ -41,10 +42,11 @@ OverlayManager::~OverlayManager()
     }
 }
 
-void OverlayManager::configure(const std::int32_t spotlight_radius_dip,
+void OverlayManager::configure(const std::int32_t spotlight_radius_dip, const overlay::SpotlightShape spotlight_shape,
                                const std::uint32_t dim_opacity_percent) noexcept
 {
     spotlight_radius_dip_ = (std::clamp)(spotlight_radius_dip, 32, 512);
+    spotlight_shape_ = spotlight_shape;
     const auto opacity = (std::clamp)(dim_opacity_percent, 10U, 90U);
     dim_alpha_ = static_cast<BYTE>((opacity * 255U + 50U) / 100U);
     destroy_ring_bitmap();
@@ -311,7 +313,7 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
     const auto monitor_height = overlay::height(monitor_bounds);
 
     HRGN full_region = CreateRectRgn(0, 0, monitor_width, monitor_height);
-    HRGN hole_region = CreateEllipticRgn(hole.left, hole.top, hole.right, hole.bottom);
+    HRGN hole_region = create_spotlight_region(hole, spotlight_shape_);
     if (full_region == nullptr || hole_region == nullptr)
     {
         if (full_region != nullptr)

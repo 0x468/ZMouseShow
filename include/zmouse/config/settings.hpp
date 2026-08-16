@@ -3,6 +3,7 @@
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
+#include "zmouse/overlay/spotlight_shape.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -16,6 +17,7 @@ struct Settings
     bool auto_timeout_enabled{};
 
     std::int32_t spotlight_radius_dip{120};
+    overlay::SpotlightShape spotlight_shape{overlay::SpotlightShape::circle};
     std::uint32_t dim_opacity_percent{60};
     std::uint64_t idle_timeout_ms{1'200};
     std::uint64_t maximum_duration_ms{5'000};

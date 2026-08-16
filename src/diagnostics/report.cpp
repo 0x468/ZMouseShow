@@ -27,6 +27,20 @@ namespace
     return "unknown";
 }
 
+[[nodiscard]] constexpr std::string_view spotlight_shape(const overlay::SpotlightShape shape) noexcept
+{
+    switch (shape)
+    {
+    case overlay::SpotlightShape::circle:
+        return "circle";
+    case overlay::SpotlightShape::rounded_square:
+        return "rounded_square";
+    case overlay::SpotlightShape::diamond:
+        return "diamond";
+    }
+    return "unknown";
+}
+
 [[nodiscard]] std::string hotkey_key(const std::uint16_t key)
 {
     if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9'))
@@ -83,6 +97,7 @@ std::string build_report(const Snapshot& snapshot)
            << "general.shake_enabled: " << boolean(settings.shake_enabled) << '\n'
            << "general.auto_timeout_enabled: " << boolean(settings.auto_timeout_enabled) << '\n'
            << "overlay.radius_dip: " << settings.spotlight_radius_dip << '\n'
+           << "overlay.shape: " << spotlight_shape(settings.spotlight_shape) << '\n'
            << "overlay.dim_opacity_percent: " << settings.dim_opacity_percent << '\n'
            << "timeout.idle_ms: " << settings.idle_timeout_ms << '\n'
            << "timeout.maximum_duration_ms: " << settings.maximum_duration_ms << '\n'

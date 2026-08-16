@@ -483,7 +483,8 @@ class Application final
         double_ctrl_detector_.configure(settings.double_ctrl);
         hotkey_detector_.configure(settings.hotkey);
         shake_detector_.configure(settings.shake);
-        overlay_manager_.configure(settings.spotlight_radius_dip, settings.dim_opacity_percent);
+        overlay_manager_.configure(settings.spotlight_radius_dip, settings.spotlight_shape,
+                                   settings.dim_opacity_percent);
     }
 
     [[nodiscard]] bool prepare_hotkey_registration(const zmouse::input::HotkeyConfig& config,
@@ -1094,9 +1095,8 @@ class Application final
 
     [[nodiscard]] bool registered_hotkey_chord_is_clean() noexcept
     {
-        const auto key_is_down = [](const int virtual_key) noexcept {
-            return (GetAsyncKeyState(virtual_key) & static_cast<SHORT>(0x8000)) != 0;
-        };
+        const auto key_is_down = [](const int virtual_key) noexcept
+        { return (GetAsyncKeyState(virtual_key) & static_cast<SHORT>(0x8000)) != 0; };
 
         bool other_key_down = mouse_buttons_ != 0;
         for (int virtual_key = 1; virtual_key < 0xFF && !other_key_down; ++virtual_key)

@@ -1,5 +1,6 @@
 #include "display_simulator.hpp"
 
+#include "zmouse/platform/spotlight_region.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -33,6 +34,20 @@ constexpr std::array simulated_monitors{
     SimulatedMonitor{{1'920, -180, 4'480, 1'260}, 144, L"DISPLAY3 · 2560×1440 · 150%", false},
 };
 constexpr RECT virtual_desktop{-2'560, -180, 4'480, 1'560};
+
+[[nodiscard]] const wchar_t* spotlight_shape_name(const overlay::SpotlightShape shape) noexcept
+{
+    switch (shape)
+    {
+    case overlay::SpotlightShape::circle:
+        return L"圆形";
+    case overlay::SpotlightShape::rounded_square:
+        return L"圆角方形";
+    case overlay::SpotlightShape::diamond:
+        return L"菱形";
+    }
+    return L"未知";
+}
 
 struct PreviewLayout
 {
@@ -179,6 +194,14 @@ class SimulatorWindow final
                 DestroyWindow(window_);
                 return 0;
             }
+            if (w_param >= '1' && w_param <= '3')
+            {
+                spotlight_shape_ = w_param == '1'   ? overlay::SpotlightShape::circle
+                                   : w_param == '2' ? overlay::SpotlightShape::rounded_square
+                                                    : overlay::SpotlightShape::diamond;
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
             break;
         case WM_GETMINMAXINFO:
         {
@@ -302,8 +325,9 @@ class SimulatorWindow final
             static_cast<void>(SelectObject(dc, old_pen));
 
             HRGN monitor_region = CreateRectRgnIndirect(&preview);
-            HRGN hole_region =
-                CreateEllipticRgn(cursor_x - radius, cursor_y - radius, cursor_x + radius + 1, cursor_y + radius + 1);
+            const overlay::Rect hole_bounds{cursor_x - radius, cursor_y - radius, cursor_x + radius + 1,
+                                            cursor_y + radius + 1};
+            HRGN hole_region = create_spotlight_region(hole_bounds, spotlight_shape_);
             if (monitor_region != nullptr && hole_region != nullptr)
             {
                 static_cast<void>(CombineRgn(monitor_region, monitor_region, hole_region, RGN_DIFF));
@@ -330,17 +354,32 @@ class SimulatorWindow final
 
         const auto previous_pen = SelectObject(dc, ring_pen);
         const auto previous_brush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-        Ellipse(dc, cursor_x - radius, cursor_y - radius, cursor_x + radius, cursor_y + radius);
+        const overlay::Rect outline_bounds{cursor_x - radius, cursor_y - radius, cursor_x + radius + 1,
+                                           cursor_y + radius + 1};
+        const HRGN outline_region = create_spotlight_region(outline_bounds, spotlight_shape_);
+        const HBRUSH outline_brush = CreateSolidBrush(accent_color);
+        if (outline_region != nullptr && outline_brush != nullptr)
+        {
+            static_cast<void>(FrameRgn(dc, outline_region, outline_brush, 3, 3));
+        }
         MoveToEx(dc, cursor_x - 7, cursor_y, nullptr);
         LineTo(dc, cursor_x + 8, cursor_y);
         MoveToEx(dc, cursor_x, cursor_y - 7, nullptr);
         LineTo(dc, cursor_x, cursor_y + 8);
         static_cast<void>(SelectObject(dc, previous_brush));
         static_cast<void>(SelectObject(dc, previous_pen));
+        if (outline_brush != nullptr)
+        {
+            DeleteObject(outline_brush);
+        }
+        if (outline_region != nullptr)
+        {
+            DeleteObject(outline_region);
+        }
 
-        wchar_t status[160]{};
-        static_cast<void>(swprintf_s(status, L"模拟坐标  x=%ld  y=%ld  ·  圆孔 120 DIP  ·  Esc 退出",
-                                     simulated_cursor_.x, simulated_cursor_.y));
+        wchar_t status[192]{};
+        static_cast<void>(swprintf_s(status, L"模拟坐标 x=%ld y=%ld · %s 120 DIP · 1/2/3 切换形状 · Esc 退出",
+                                     simulated_cursor_.x, simulated_cursor_.y, spotlight_shape_name(spotlight_shape_)));
         draw_text_line(dc, body_font, status, {36, client.bottom - 46, client.right - 36, client.bottom - 14},
                        muted_text_color, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
@@ -358,6 +397,7 @@ class SimulatorWindow final
     HINSTANCE instance_{};
     HWND window_{};
     POINT simulated_cursor_{960, 540};
+    overlay::SpotlightShape spotlight_shape_{overlay::SpotlightShape::circle};
 };
 } // namespace
 

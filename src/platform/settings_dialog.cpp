@@ -154,6 +154,12 @@ class SettingsDialog final
             SendDlgItemMessageW(dialog_, IDC_CTRL_SIDE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"右 Ctrl")));
         static_cast<void>(
             SendDlgItemMessageW(dialog_, IDC_CTRL_SIDE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"任一侧 Ctrl")));
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"圆形")));
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"圆角方形")));
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"菱形")));
 
         int side = 0;
         if (draft_.double_ctrl.side == input::ControlSide::right)
@@ -165,6 +171,17 @@ class SettingsDialog final
             side = 2;
         }
         static_cast<void>(SendDlgItemMessageW(dialog_, IDC_CTRL_SIDE, CB_SETCURSEL, side, 0));
+
+        int shape = 0;
+        if (draft_.spotlight_shape == overlay::SpotlightShape::rounded_square)
+        {
+            shape = 1;
+        }
+        else if (draft_.spotlight_shape == overlay::SpotlightShape::diamond)
+        {
+            shape = 2;
+        }
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_SETCURSEL, shape, 0));
         CheckDlgButton(dialog_, IDC_SHAKE_ENABLED, draft_.shake_enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_DOUBLE_CTRL_ENABLED, draft_.double_ctrl.enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_HOTKEY_ENABLED, draft_.hotkey.enabled ? BST_CHECKED : BST_UNCHECKED);
@@ -233,7 +250,8 @@ class SettingsDialog final
             notification == BN_CLICKED &&
             (control == IDC_SHAKE_ENABLED || control == IDC_DOUBLE_CTRL_ENABLED || control == IDC_HOTKEY_ENABLED ||
              control == IDC_HOTKEY_WINDOWS || control == IDC_AUTO_TIMEOUT_ENABLED);
-        const bool combo_changed = control == IDC_CTRL_SIDE && notification == CBN_SELCHANGE;
+        const bool combo_changed =
+            (control == IDC_CTRL_SIDE || control == IDC_SPOTLIGHT_SHAPE) && notification == CBN_SELCHANGE;
         const bool edit_changed =
             notification == EN_CHANGE &&
             (control == IDC_RADIUS_DIP || control == IDC_DIM_OPACITY || control == IDC_HOTKEY_CAPTURE);
@@ -251,7 +269,7 @@ class SettingsDialog final
         const UINT radius = GetDlgItemInt(dialog_, IDC_RADIUS_DIP, &radius_valid, FALSE);
         if (radius_valid == FALSE || radius < 32 || radius > 512)
         {
-            MessageBoxW(dialog_, L"圆孔半径必须是 32–512 DIP。", L"ZMouseShow 设置", MB_OK | MB_ICONWARNING);
+            MessageBoxW(dialog_, L"高亮半径必须是 32–512 DIP。", L"ZMouseShow 设置", MB_OK | MB_ICONWARNING);
             SetFocus(GetDlgItem(dialog_, IDC_RADIUS_DIP));
             return false;
         }
@@ -266,7 +284,8 @@ class SettingsDialog final
         }
 
         const LRESULT side = SendDlgItemMessageW(dialog_, IDC_CTRL_SIDE, CB_GETCURSEL, 0, 0);
-        if (side < 0 || side > 2)
+        const LRESULT shape = SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_GETCURSEL, 0, 0);
+        if (side < 0 || side > 2 || shape < 0 || shape > 2)
         {
             return false;
         }
@@ -285,6 +304,9 @@ class SettingsDialog final
         }
         settings.auto_timeout_enabled = IsDlgButtonChecked(dialog_, IDC_AUTO_TIMEOUT_ENABLED) == BST_CHECKED;
         settings.spotlight_radius_dip = static_cast<std::int32_t>(radius);
+        settings.spotlight_shape = shape == 0   ? overlay::SpotlightShape::circle
+                                   : shape == 1 ? overlay::SpotlightShape::rounded_square
+                                                : overlay::SpotlightShape::diamond;
         settings.dim_opacity_percent = opacity;
         settings.double_ctrl.side = side == 0   ? input::ControlSide::left
                                     : side == 1 ? input::ControlSide::right

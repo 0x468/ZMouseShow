@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "zmouse/overlay/geometry.hpp"
+#include "zmouse/overlay/spotlight_shape.hpp"
 #include <cstdint>
 #include <vector>
 
@@ -16,7 +17,8 @@ class OverlayManager final
     OverlayManager& operator=(const OverlayManager&) = delete;
     ~OverlayManager();
 
-    void configure(std::int32_t spotlight_radius_dip, std::uint32_t dim_opacity_percent) noexcept;
+    void configure(std::int32_t spotlight_radius_dip, overlay::SpotlightShape spotlight_shape,
+                   std::uint32_t dim_opacity_percent) noexcept;
     [[nodiscard]] bool initialize(HINSTANCE instance);
     [[nodiscard]] bool rebuild();
     [[nodiscard]] bool show_at(overlay::Point cursor);
@@ -65,6 +67,7 @@ class OverlayManager final
     std::int32_t ring_visual_radius_px_{};
     std::int32_t ring_stroke_px_{};
     std::int32_t spotlight_radius_dip_{120};
+    overlay::SpotlightShape spotlight_shape_{overlay::SpotlightShape::circle};
     BYTE dim_alpha_{153};
     double dim_progress_{1.0};
     double ring_scale_{1.0};

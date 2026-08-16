@@ -66,6 +66,7 @@ auto_timeout_enabled = true
 
 [overlay]
 radius_dip = 180
+shape = "diamond"
 dim_opacity_percent = 72
 
 [timeout]
@@ -104,6 +105,7 @@ cooldown_ms = 1100
     check(settings->shake_enabled, "shake setting is parsed");
     check(settings->auto_timeout_enabled, "timeout setting is parsed");
     check(settings->spotlight_radius_dip == 180, "spotlight radius is parsed");
+    check(settings->spotlight_shape == zmouse::overlay::SpotlightShape::diamond, "spotlight shape is parsed");
     check(settings->dim_opacity_percent == 72, "dim opacity is parsed");
     check(settings->idle_timeout_ms == 2500, "idle timeout is parsed");
     check(settings->maximum_duration_ms == 12000, "maximum duration is parsed");
@@ -130,6 +132,7 @@ unknown_key = 42
 
 [overlay]
 radius_dip = 4096
+shape = "hexagon"
 dim_opacity_percent = -1
 
 [timeout]
@@ -158,6 +161,8 @@ minimum_distance = nan
 
     check(!settings->shake_enabled, "a wrong-type boolean uses its default");
     check(settings->spotlight_radius_dip == 120, "out-of-range radius uses its default");
+    check(settings->spotlight_shape == zmouse::overlay::SpotlightShape::circle,
+          "an unsupported spotlight shape uses its default");
     check(settings->dim_opacity_percent == 60, "out-of-range opacity uses its default");
     check(settings->idle_timeout_ms == 1200, "a wrong-type timeout uses its default");
     check(settings->maximum_duration_ms == 5000, "out-of-range duration uses its default");
@@ -216,7 +221,9 @@ void test_exported_defaults_round_trip()
     }
 
     check(!settings->shake_enabled && !settings->auto_timeout_enabled, "exported defaults keep optional triggers off");
-    check(settings->spotlight_radius_dip == 120 && settings->dim_opacity_percent == 60,
+    check(settings->spotlight_radius_dip == 120 &&
+              settings->spotlight_shape == zmouse::overlay::SpotlightShape::circle &&
+              settings->dim_opacity_percent == 60,
           "exported overlay defaults round-trip");
     check(settings->double_ctrl.maximum_interval_ms == 500, "exported Ctrl defaults round-trip");
     check(settings->double_ctrl.side == zmouse::input::ControlSide::left, "exported Ctrl side defaults to left");
@@ -287,6 +294,7 @@ auto_timeout_enabled = false
 
 [overlay]
 radius_dip = 120 # keep radius comment
+shape = "circle"
 dim_opacity_percent = 60
 
 [double_ctrl]
@@ -304,6 +312,7 @@ answer = 42
     settings.shake_enabled = true;
     settings.auto_timeout_enabled = true;
     settings.spotlight_radius_dip = 180;
+    settings.spotlight_shape = zmouse::overlay::SpotlightShape::rounded_square;
     settings.dim_opacity_percent = 72;
     settings.double_ctrl.enabled = false;
     settings.double_ctrl.side = zmouse::input::ControlSide::right;
@@ -319,7 +328,9 @@ answer = 42
 
     const auto loaded = zmouse::config::load_toml(path);
     check(loaded && loaded->shake_enabled && loaded->auto_timeout_enabled, "persisted general settings load back");
-    check(loaded && loaded->spotlight_radius_dip == 180 && loaded->dim_opacity_percent == 72,
+    check(loaded && loaded->spotlight_radius_dip == 180 &&
+              loaded->spotlight_shape == zmouse::overlay::SpotlightShape::rounded_square &&
+              loaded->dim_opacity_percent == 72,
           "persisted overlay settings load back");
     check(loaded && !loaded->double_ctrl.enabled && loaded->double_ctrl.side == zmouse::input::ControlSide::right &&
               loaded->hotkey.enabled && loaded->hotkey.key == 'K' && loaded->hotkey.shift,
@@ -378,6 +389,8 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
           "diagnostics include effective keyboard settings");
     check(report.find("custom_hotkey_registered: true") != std::string::npos,
           "diagnostics distinguish requested and registered custom hotkeys");
+    check(report.find("overlay.shape: circle") != std::string::npos,
+          "diagnostics report the effective spotlight shape");
     check(report.find("does not contain key history") != std::string::npos,
           "diagnostics explicitly document their privacy boundary");
 

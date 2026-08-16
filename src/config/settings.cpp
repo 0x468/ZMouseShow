@@ -24,6 +24,7 @@ auto_timeout_enabled = false
 
 [overlay]
 radius_dip = 120
+shape = "circle"
 dim_opacity_percent = 60
 
 [timeout]
@@ -142,6 +143,37 @@ void assign_double(const toml::table& table, const std::string_view key, double&
     return static_cast<std::uint16_t>(0x70U + function_number - 1U);
 }
 
+[[nodiscard]] std::optional<overlay::SpotlightShape> parse_spotlight_shape(const std::string_view value) noexcept
+{
+    if (value == "circle")
+    {
+        return overlay::SpotlightShape::circle;
+    }
+    if (value == "rounded_square")
+    {
+        return overlay::SpotlightShape::rounded_square;
+    }
+    if (value == "diamond")
+    {
+        return overlay::SpotlightShape::diamond;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::string_view spotlight_shape_name(const overlay::SpotlightShape shape) noexcept
+{
+    switch (shape)
+    {
+    case overlay::SpotlightShape::circle:
+        return "circle";
+    case overlay::SpotlightShape::rounded_square:
+        return "rounded_square";
+    case overlay::SpotlightShape::diamond:
+        return "diamond";
+    }
+    return "circle";
+}
+
 void apply_table(const toml::table& document, Settings& settings) noexcept
 {
     if (const auto* general = document["general"].as_table())
@@ -159,6 +191,13 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
     if (const auto* overlay = document["overlay"].as_table())
     {
         assign_integer(*overlay, "radius_dip", settings.spotlight_radius_dip, 32, 512);
+        if (const auto value = (*overlay)["shape"].value<std::string>())
+        {
+            if (const auto shape = parse_spotlight_shape(*value))
+            {
+                settings.spotlight_shape = *shape;
+            }
+        }
         assign_integer(*overlay, "dim_opacity_percent", settings.dim_opacity_percent, 10, 90);
     }
 
@@ -720,6 +759,8 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
         updated = patch_value(updated, "hotkey", "shift", settings.hotkey.shift ? "true" : "false");
         updated = patch_value(updated, "hotkey", "windows", settings.hotkey.windows ? "true" : "false");
         updated = patch_value(updated, "overlay", "radius_dip", std::to_string(settings.spotlight_radius_dip));
+        updated = patch_value(updated, "overlay", "shape",
+                              '"' + std::string(spotlight_shape_name(settings.spotlight_shape)) + '"');
         updated = patch_value(updated, "overlay", "dim_opacity_percent", std::to_string(settings.dim_opacity_percent));
         if (updated.size() > maximum_config_size)
         {
@@ -735,6 +776,7 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
             verified->hotkey.control != settings.hotkey.control || verified->hotkey.alt != settings.hotkey.alt ||
             verified->hotkey.shift != settings.hotkey.shift || verified->hotkey.windows != settings.hotkey.windows ||
             verified->spotlight_radius_dip != settings.spotlight_radius_dip ||
+            verified->spotlight_shape != settings.spotlight_shape ||
             verified->dim_opacity_percent != settings.dim_opacity_percent)
         {
             return false;
