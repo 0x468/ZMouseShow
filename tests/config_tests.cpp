@@ -55,6 +55,9 @@ void test_empty_configuration_uses_defaults()
     check(!settings->auto_timeout_enabled, "automatic timeout is disabled by default");
     check(settings->spotlight_radius_dip == 120, "default spotlight radius is retained");
     check(settings->dim_opacity_percent == 60, "default dim opacity is retained");
+    check(settings->activation_policy.fullscreen_suppression == zmouse::policy::FullscreenSuppression::automatic &&
+              settings->activation_policy.excluded_processes.empty() && !settings->startup_enabled,
+          "behavior and startup defaults are retained");
 }
 
 void test_valid_values_override_defaults()
@@ -75,6 +78,13 @@ ripple_enabled = false
 crosshair_enabled = true
 enlarged_cursor_enabled = true
 cursor_scale_percent = 250
+
+[behavior]
+fullscreen_suppression = "strict"
+excluded_processes = ["Game.EXE", "editor.exe", "game.exe"]
+
+[startup]
+enabled = true
 
 [timeout]
 idle_ms = 2500
@@ -118,6 +128,10 @@ cooldown_ms = 1100
               settings->effects.crosshair_enabled && settings->effects.enlarged_cursor_enabled &&
               settings->effects.cursor_scale_percent == 250,
           "visual effect options are parsed");
+    check(settings->activation_policy.fullscreen_suppression == zmouse::policy::FullscreenSuppression::strict &&
+              settings->activation_policy.excluded_processes == std::vector<std::string>({"game.exe", "editor.exe"}) &&
+              settings->startup_enabled,
+          "behavior and startup options are parsed and normalized");
     check(settings->idle_timeout_ms == 2500, "idle timeout is parsed");
     check(settings->maximum_duration_ms == 12000, "maximum duration is parsed");
     check(settings->double_ctrl.side == zmouse::input::ControlSide::right, "Ctrl side is parsed");
@@ -150,6 +164,13 @@ dim_opacity_percent = -1
 focus_ring_enabled = "yes"
 cursor_scale_percent = 9999
 
+[behavior]
+fullscreen_suppression = "guess"
+excluded_processes = ["C:\\game.exe"]
+
+[startup]
+enabled = "yes"
+
 [timeout]
 idle_ms = "not-a-number"
 maximum_duration_ms = 9999999
@@ -181,6 +202,9 @@ minimum_distance = nan
     check(settings->dim_opacity_percent == 60, "out-of-range opacity uses its default");
     check(settings->effects.focus_ring_enabled && settings->effects.cursor_scale_percent == 200,
           "invalid visual effect fields use their defaults");
+    check(settings->activation_policy.fullscreen_suppression == zmouse::policy::FullscreenSuppression::automatic &&
+              settings->activation_policy.excluded_processes.empty() && !settings->startup_enabled,
+          "invalid behavior and startup fields use their defaults");
     check(settings->idle_timeout_ms == 1200, "a wrong-type timeout uses its default");
     check(settings->maximum_duration_ms == 5000, "out-of-range duration uses its default");
     check(settings->double_ctrl.minimum_interval_ms == 100 && settings->double_ctrl.maximum_interval_ms == 500,
@@ -246,6 +270,9 @@ void test_exported_defaults_round_trip()
               !settings->effects.crosshair_enabled && !settings->effects.enlarged_cursor_enabled &&
               settings->effects.cursor_scale_percent == 200,
           "exported visual effect defaults round-trip");
+    check(settings->activation_policy.fullscreen_suppression == zmouse::policy::FullscreenSuppression::automatic &&
+              settings->activation_policy.excluded_processes.empty() && !settings->startup_enabled,
+          "exported behavior and startup defaults round-trip");
     check(settings->double_ctrl.maximum_interval_ms == 500, "exported Ctrl defaults round-trip");
     check(settings->double_ctrl.side == zmouse::input::ControlSide::left, "exported Ctrl side defaults to left");
     check(!settings->hotkey.enabled && settings->hotkey.key == 0x7A, "exported custom hotkey defaults round-trip");
@@ -343,6 +370,9 @@ answer = 42
     settings.effects.crosshair_enabled = true;
     settings.effects.enlarged_cursor_enabled = true;
     settings.effects.cursor_scale_percent = 275;
+    settings.activation_policy.fullscreen_suppression = zmouse::policy::FullscreenSuppression::strict;
+    settings.activation_policy.excluded_processes = {"game.exe", "presenter.exe"};
+    settings.startup_enabled = true;
     settings.double_ctrl.enabled = false;
     settings.double_ctrl.side = zmouse::input::ControlSide::right;
     settings.hotkey.enabled = true;
@@ -365,6 +395,10 @@ answer = 42
               loaded->effects.crosshair_enabled && loaded->effects.enlarged_cursor_enabled &&
               loaded->effects.cursor_scale_percent == 275,
           "persisted visual effect settings load back");
+    check(loaded && loaded->activation_policy.fullscreen_suppression == zmouse::policy::FullscreenSuppression::strict &&
+              loaded->activation_policy.excluded_processes == std::vector<std::string>({"game.exe", "presenter.exe"}) &&
+              loaded->startup_enabled,
+          "persisted behavior and startup settings load back");
     check(loaded && !loaded->double_ctrl.enabled && loaded->double_ctrl.side == zmouse::input::ControlSide::right &&
               loaded->hotkey.enabled && loaded->hotkey.key == 'K' && loaded->hotkey.shift,
           "persisted trigger settings load back");
@@ -399,6 +433,7 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
         .paused = true,
         .remote_session = false,
         .custom_hotkey_registered = true,
+        .startup_registered = true,
         .virtual_desktop = {-2560, 0, 2560, 1440},
         .monitors = {{.device_name = "DISPLAY1",
                       .bounds = {-2560, 0, 0, 1440},
@@ -410,6 +445,9 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
     snapshot.settings.double_ctrl.enabled = false;
     snapshot.settings.double_ctrl.side = zmouse::input::ControlSide::right;
     snapshot.settings.hotkey.enabled = true;
+    snapshot.settings.activation_policy.fullscreen_suppression = zmouse::policy::FullscreenSuppression::strict;
+    snapshot.settings.activation_policy.excluded_processes = {"game.exe"};
+    snapshot.settings.startup_enabled = true;
 
     const auto report = zmouse::diagnostics::build_report(snapshot);
     check(report.find("version: 0.1.0-test") != std::string::npos, "diagnostics include the application version");
@@ -422,11 +460,17 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
           "diagnostics include effective keyboard settings");
     check(report.find("custom_hotkey_registered: true") != std::string::npos,
           "diagnostics distinguish requested and registered custom hotkeys");
+    check(report.find("startup_registered: true") != std::string::npos,
+          "diagnostics include the effective startup registration state");
     check(report.find("overlay.shape: circle") != std::string::npos,
           "diagnostics report the effective spotlight shape");
     check(report.find("effects.ripple_enabled: true") != std::string::npos &&
               report.find("effects.cursor_scale_percent: 200") != std::string::npos,
           "diagnostics report visual effect options");
+    check(report.find("behavior.fullscreen_suppression: strict") != std::string::npos &&
+              report.find("behavior.excluded_processes[0]: game.exe") != std::string::npos &&
+              report.find("startup.enabled: true") != std::string::npos,
+          "diagnostics report behavior and startup options");
     check(report.find("does not contain key history") != std::string::npos,
           "diagnostics explicitly document their privacy boundary");
 

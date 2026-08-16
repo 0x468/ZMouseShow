@@ -4,8 +4,10 @@
 #include <shellapi.h>
 
 #include "display_simulator.hpp"
+#include "foreground_context.hpp"
 #include "overlay_manager.hpp"
 #include "settings_dialog.hpp"
+#include "startup_registration.hpp"
 #include "zmouse/config/settings.hpp"
 #include "zmouse/diagnostics/report.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
@@ -245,6 +247,11 @@ class Application final
         {
             DestroyWindow(window_);
             return 1;
+        }
+        if (!zmouse::platform::set_startup_registration_enabled(settings_.startup_enabled))
+        {
+            show_tray_notification(L"ZMouseShow", L"无法更新当前用户的登录自启动设置，可能受到企业策略限制。",
+                                   NIIF_WARNING);
         }
         if (!hotkey_available)
         {
@@ -589,6 +596,7 @@ class Application final
                 .paused = paused_,
                 .remote_session = GetSystemMetrics(SM_REMOTESESSION) != 0,
                 .custom_hotkey_registered = hotkey_registration_.active(),
+                .startup_registered = zmouse::platform::startup_registration_enabled(),
                 .virtual_desktop = {virtual_left, virtual_top, virtual_left + GetSystemMetrics(SM_CXVIRTUALSCREEN),
                                     virtual_top + GetSystemMetrics(SM_CYVIRTUALSCREEN)},
                 .monitors = std::move(collection.monitors),
@@ -624,8 +632,14 @@ class Application final
         {
             return false;
         }
+        const bool startup_was_enabled = zmouse::platform::startup_registration_enabled();
+        if (!zmouse::platform::set_startup_registration_enabled(settings.startup_enabled))
+        {
+            return false;
+        }
         if (!zmouse::config::persist_basic_settings(application.config_path_, settings))
         {
+            static_cast<void>(zmouse::platform::set_startup_registration_enabled(startup_was_enabled));
             return false;
         }
         application.commit_hotkey_registration(std::move(replacement), hotkey_changed, settings.hotkey);
@@ -682,9 +696,15 @@ class Application final
         schedule_overlay_timer();
     }
 
-    void request_overlay_activation(const bool capture_pressed_keys) noexcept
+    void request_overlay_activation(const bool capture_pressed_keys,
+                                    const zmouse::policy::TriggerSource source) noexcept
     {
         if (activation_pending_ || paused_ || settings_dialog_open_ || overlay_manager_.visible())
+        {
+            return;
+        }
+        if (!zmouse::policy::should_allow_activation(settings_.activation_policy, source,
+                                                     zmouse::platform::query_foreground_context()))
         {
             return;
         }
@@ -899,7 +919,7 @@ class Application final
                 double_ctrl_detector_.reset();
                 if (registered_hotkey_chord_is_clean())
                 {
-                    request_overlay_activation(true);
+                    request_overlay_activation(true, zmouse::policy::TriggerSource::custom_hotkey);
                 }
             }
             return 0;
@@ -1071,7 +1091,7 @@ class Application final
             if (hotkey_detector_.process(hotkey_event))
             {
                 double_ctrl_detector_.reset();
-                request_overlay_activation(true);
+                request_overlay_activation(true, zmouse::policy::TriggerSource::custom_hotkey);
                 return;
             }
         }
@@ -1086,7 +1106,7 @@ class Application final
         };
         if (double_ctrl_detector_.process(control_event, any_other_key_down, mouse_buttons_ != 0))
         {
-            request_overlay_activation(true);
+            request_overlay_activation(true, zmouse::policy::TriggerSource::double_ctrl);
         }
     }
 
@@ -1191,7 +1211,7 @@ class Application final
         };
         if (shake_detector_.process(movement, false))
         {
-            request_overlay_activation(false);
+            request_overlay_activation(false, zmouse::policy::TriggerSource::mouse_shake);
         }
     }
 

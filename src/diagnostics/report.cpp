@@ -41,6 +41,20 @@ namespace
     return "unknown";
 }
 
+[[nodiscard]] constexpr std::string_view fullscreen_suppression(const policy::FullscreenSuppression mode) noexcept
+{
+    switch (mode)
+    {
+    case policy::FullscreenSuppression::off:
+        return "off";
+    case policy::FullscreenSuppression::automatic:
+        return "automatic";
+    case policy::FullscreenSuppression::strict:
+        return "strict";
+    }
+    return "unknown";
+}
+
 [[nodiscard]] std::string hotkey_key(const std::uint16_t key)
 {
     if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9'))
@@ -73,7 +87,8 @@ std::string build_report(const Snapshot& snapshot)
            << "config_path: " << snapshot.config_path << '\n'
            << "paused: " << boolean(snapshot.paused) << '\n'
            << "remote_session: " << boolean(snapshot.remote_session) << '\n'
-           << "custom_hotkey_registered: " << boolean(snapshot.custom_hotkey_registered) << "\n\n"
+           << "custom_hotkey_registered: " << boolean(snapshot.custom_hotkey_registered) << '\n'
+           << "startup_registered: " << boolean(snapshot.startup_registered) << "\n\n"
            << "Display topology\n"
            << "----------------\n"
            << "virtual_desktop: ";
@@ -104,6 +119,15 @@ std::string build_report(const Snapshot& snapshot)
            << "effects.crosshair_enabled: " << boolean(settings.effects.crosshair_enabled) << '\n'
            << "effects.enlarged_cursor_enabled: " << boolean(settings.effects.enlarged_cursor_enabled) << '\n'
            << "effects.cursor_scale_percent: " << settings.effects.cursor_scale_percent << '\n'
+           << "behavior.fullscreen_suppression: "
+           << fullscreen_suppression(settings.activation_policy.fullscreen_suppression) << '\n'
+           << "behavior.excluded_process_count: " << settings.activation_policy.excluded_processes.size() << '\n';
+    for (std::size_t index = 0; index < settings.activation_policy.excluded_processes.size(); ++index)
+    {
+        report << "behavior.excluded_processes[" << index
+               << "]: " << settings.activation_policy.excluded_processes[index] << '\n';
+    }
+    report << "startup.enabled: " << boolean(settings.startup_enabled) << '\n'
            << "timeout.idle_ms: " << settings.idle_timeout_ms << '\n'
            << "timeout.maximum_duration_ms: " << settings.maximum_duration_ms << '\n'
            << "double_ctrl.enabled: " << boolean(settings.double_ctrl.enabled) << '\n'

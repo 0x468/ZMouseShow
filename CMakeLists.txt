@@ -30,6 +30,7 @@ add_library(zmouse_core STATIC
     src/input/hotkey_detector.cpp
     src/input/shake_detector.cpp
     src/overlay/locator_animation.cpp
+    src/policy/activation_policy.cpp
     src/render/cursor_compositor.cpp
     src/render/ring_rasterizer.cpp
 )
@@ -47,10 +48,12 @@ zmouse_apply_project_options(zmouse_core)
 
 add_executable(ZMouseShow WIN32
     src/platform/display_simulator.cpp
+    src/platform/foreground_context.cpp
     src/platform/global_hotkey_registration.cpp
     src/platform/overlay_manager.cpp
     src/platform/settings_dialog.cpp
     src/platform/spotlight_region.cpp
+    src/platform/startup_registration.cpp
     src/platform/win32_main.cpp
     resources/ZMouseShow.rc
     resources/ZMouseShow.manifest
@@ -59,7 +62,9 @@ add_executable(ZMouseShow WIN32
 target_link_libraries(ZMouseShow
     PRIVATE
         ZMouseShow::Core
+        advapi32
         comctl32
+        dwmapi
         gdi32
         shell32
         shcore
@@ -100,6 +105,13 @@ if(BUILD_TESTING)
     target_link_libraries(zmouse_cursor_compositor_tests PRIVATE ZMouseShow::Core)
     zmouse_apply_project_options(zmouse_cursor_compositor_tests)
     add_test(NAME cursor_compositor COMMAND zmouse_cursor_compositor_tests)
+
+    add_executable(zmouse_activation_policy_tests
+        tests/activation_policy_tests.cpp
+    )
+    target_link_libraries(zmouse_activation_policy_tests PRIVATE ZMouseShow::Core)
+    zmouse_apply_project_options(zmouse_activation_policy_tests)
+    add_test(NAME activation_policy COMMAND zmouse_activation_policy_tests)
 
     add_executable(zmouse_global_hotkey_tests
         src/platform/global_hotkey_registration.cpp

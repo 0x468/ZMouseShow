@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -33,6 +34,13 @@ ripple_enabled = true
 crosshair_enabled = false
 enlarged_cursor_enabled = false
 cursor_scale_percent = 200
+
+[behavior]
+fullscreen_suppression = "automatic"
+excluded_processes = []
+
+[startup]
+enabled = false
 
 [timeout]
 idle_ms = 1200
@@ -181,6 +189,83 @@ void assign_double(const toml::table& table, const std::string_view key, double&
     return "circle";
 }
 
+[[nodiscard]] std::optional<policy::FullscreenSuppression> parse_fullscreen_suppression(
+    const std::string_view value) noexcept
+{
+    if (value == "off")
+    {
+        return policy::FullscreenSuppression::off;
+    }
+    if (value == "automatic")
+    {
+        return policy::FullscreenSuppression::automatic;
+    }
+    if (value == "strict")
+    {
+        return policy::FullscreenSuppression::strict;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::string_view fullscreen_suppression_name(const policy::FullscreenSuppression mode) noexcept
+{
+    switch (mode)
+    {
+    case policy::FullscreenSuppression::off:
+        return "off";
+    case policy::FullscreenSuppression::automatic:
+        return "automatic";
+    case policy::FullscreenSuppression::strict:
+        return "strict";
+    }
+    return "automatic";
+}
+
+[[nodiscard]] std::optional<std::vector<std::string>> parse_excluded_processes(const toml::node* node)
+{
+    if (node == nullptr)
+    {
+        return std::vector<std::string>{};
+    }
+    const auto* array = node->as_array();
+    if (array == nullptr || array->size() > 64)
+    {
+        return std::nullopt;
+    }
+
+    std::vector<std::string> result;
+    result.reserve(array->size());
+    for (const auto& item : *array)
+    {
+        const auto value = item.value<std::string>();
+        const auto normalized = value ? policy::normalize_executable_name(*value) : std::nullopt;
+        if (!normalized)
+        {
+            return std::nullopt;
+        }
+        if (std::ranges::find(result, *normalized) == result.end())
+        {
+            result.push_back(*normalized);
+        }
+    }
+    return result;
+}
+
+[[nodiscard]] std::string excluded_processes_toml(const std::vector<std::string>& processes)
+{
+    std::string result{"["};
+    for (std::size_t index = 0; index < processes.size(); ++index)
+    {
+        if (index != 0)
+        {
+            result += ", ";
+        }
+        result += '"' + processes[index] + '"';
+    }
+    result += ']';
+    return result;
+}
+
 void apply_table(const toml::table& document, Settings& settings) noexcept
 {
     if (const auto* general = document["general"].as_table())
@@ -233,6 +318,29 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
             settings.effects.enlarged_cursor_enabled = *value;
         }
         assign_integer(*effects, "cursor_scale_percent", settings.effects.cursor_scale_percent, 125, 400);
+    }
+
+    if (const auto* behavior = document["behavior"].as_table())
+    {
+        if (const auto value = (*behavior)["fullscreen_suppression"].value<std::string>())
+        {
+            if (const auto mode = parse_fullscreen_suppression(*value))
+            {
+                settings.activation_policy.fullscreen_suppression = *mode;
+            }
+        }
+        if (const auto processes = parse_excluded_processes(behavior->get("excluded_processes")))
+        {
+            settings.activation_policy.excluded_processes = *processes;
+        }
+    }
+
+    if (const auto* startup = document["startup"].as_table())
+    {
+        if (const auto value = (*startup)["enabled"].value<bool>())
+        {
+            settings.startup_enabled = *value;
+        }
     }
 
     const auto default_double_ctrl = input::DoubleCtrlConfig{};
@@ -799,6 +907,12 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
                               settings.effects.enlarged_cursor_enabled ? "true" : "false");
         updated = patch_value(updated, "effects", "cursor_scale_percent",
                               std::to_string(settings.effects.cursor_scale_percent));
+        updated = patch_value(
+            updated, "behavior", "fullscreen_suppression",
+            '"' + std::string(fullscreen_suppression_name(settings.activation_policy.fullscreen_suppression)) + '"');
+        updated = patch_value(updated, "behavior", "excluded_processes",
+                              excluded_processes_toml(settings.activation_policy.excluded_processes));
+        updated = patch_value(updated, "startup", "enabled", settings.startup_enabled ? "true" : "false");
         if (updated.size() > maximum_config_size)
         {
             return false;
@@ -819,7 +933,10 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
             verified->effects.ripple_enabled != settings.effects.ripple_enabled ||
             verified->effects.crosshair_enabled != settings.effects.crosshair_enabled ||
             verified->effects.enlarged_cursor_enabled != settings.effects.enlarged_cursor_enabled ||
-            verified->effects.cursor_scale_percent != settings.effects.cursor_scale_percent)
+            verified->effects.cursor_scale_percent != settings.effects.cursor_scale_percent ||
+            verified->activation_policy.fullscreen_suppression != settings.activation_policy.fullscreen_suppression ||
+            verified->activation_policy.excluded_processes != settings.activation_policy.excluded_processes ||
+            verified->startup_enabled != settings.startup_enabled)
         {
             return false;
         }

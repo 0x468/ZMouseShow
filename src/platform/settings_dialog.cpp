@@ -1,15 +1,141 @@
 #include "settings_dialog.hpp"
 
 #include "../../resources/resource.h"
+#include <algorithm>
 #include <commctrl.h>
 #include <cstdint>
 #include <cwchar>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace zmouse::platform
 {
 namespace
 {
+[[nodiscard]] std::wstring wide_from_utf8(const std::string_view value)
+{
+    if (value.empty())
+    {
+        return {};
+    }
+    const int size =
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    if (size <= 0)
+    {
+        return {};
+    }
+    std::wstring result(static_cast<std::size_t>(size), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(),
+                            size) != size)
+    {
+        return {};
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<std::string> utf8_from_wide(const std::wstring_view value) noexcept
+{
+    try
+    {
+        if (value.empty())
+        {
+            return std::string{};
+        }
+        const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                                             static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+        if (size <= 0)
+        {
+            return std::nullopt;
+        }
+        std::string result(static_cast<std::size_t>(size), '\0');
+        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+                                result.data(), size, nullptr, nullptr) != size)
+        {
+            return std::nullopt;
+        }
+        return result;
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::wstring format_excluded_processes(const std::vector<std::string>& processes)
+{
+    std::wstring result;
+    for (std::size_t index = 0; index < processes.size(); ++index)
+    {
+        if (index != 0)
+        {
+            result += L"; ";
+        }
+        result += wide_from_utf8(processes[index]);
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<std::vector<std::string>> read_excluded_processes(const HWND dialog) noexcept
+{
+    try
+    {
+        const HWND edit = GetDlgItem(dialog, IDC_EXCLUDED_PROCESSES);
+        const int length = GetWindowTextLengthW(edit);
+        if (length < 0 || length > 16'384)
+        {
+            return std::nullopt;
+        }
+        std::wstring text(static_cast<std::size_t>(length) + 1, L'\0');
+        const int copied = GetWindowTextW(edit, text.data(), static_cast<int>(text.size()));
+        if (copied < 0)
+        {
+            return std::nullopt;
+        }
+        text.resize(static_cast<std::size_t>(copied));
+
+        std::vector<std::string> result;
+        std::size_t start = 0;
+        while (start <= text.size())
+        {
+            const auto end = text.find_first_of(L";\r\n", start);
+            const auto token =
+                std::wstring_view(text).substr(start, end == std::wstring::npos ? text.size() - start : end - start);
+            const auto utf8 = utf8_from_wide(token);
+            if (!utf8)
+            {
+                return std::nullopt;
+            }
+            if (const auto normalized = policy::normalize_executable_name(*utf8))
+            {
+                if (std::ranges::find(result, *normalized) == result.end())
+                {
+                    result.push_back(*normalized);
+                }
+                if (result.size() > 64)
+                {
+                    return std::nullopt;
+                }
+            }
+            else if (token.find_first_not_of(L" \t") != std::wstring_view::npos)
+            {
+                return std::nullopt;
+            }
+            if (end == std::wstring::npos)
+            {
+                break;
+            }
+            start = end + 1;
+        }
+        return result;
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] std::wstring hotkey_name(const input::HotkeyConfig& hotkey)
 {
     std::wstring name;
@@ -160,6 +286,12 @@ class SettingsDialog final
             SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"圆角方形")));
         static_cast<void>(
             SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"菱形")));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_ADDSTRING, 0,
+                                              reinterpret_cast<LPARAM>(L"自动（仅抑制晃动）")));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_ADDSTRING, 0,
+                                              reinterpret_cast<LPARAM>(L"关闭")));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_ADDSTRING, 0,
+                                              reinterpret_cast<LPARAM>(L"严格（抑制全部）")));
 
         int side = 0;
         if (draft_.double_ctrl.side == input::ControlSide::right)
@@ -182,6 +314,17 @@ class SettingsDialog final
             shape = 2;
         }
         static_cast<void>(SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_SETCURSEL, shape, 0));
+        int fullscreen_suppression = 0;
+        if (draft_.activation_policy.fullscreen_suppression == policy::FullscreenSuppression::off)
+        {
+            fullscreen_suppression = 1;
+        }
+        else if (draft_.activation_policy.fullscreen_suppression == policy::FullscreenSuppression::strict)
+        {
+            fullscreen_suppression = 2;
+        }
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_SETCURSEL, fullscreen_suppression, 0));
         CheckDlgButton(dialog_, IDC_SHAKE_ENABLED, draft_.shake_enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_DOUBLE_CTRL_ENABLED, draft_.double_ctrl.enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_HOTKEY_ENABLED, draft_.hotkey.enabled ? BST_CHECKED : BST_UNCHECKED);
@@ -192,12 +335,15 @@ class SettingsDialog final
         CheckDlgButton(dialog_, IDC_CROSSHAIR_ENABLED, draft_.effects.crosshair_enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_ENLARGED_CURSOR_ENABLED,
                        draft_.effects.enlarged_cursor_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_STARTUP_ENABLED, draft_.startup_enabled ? BST_CHECKED : BST_UNCHECKED);
         EnableWindow(GetDlgItem(dialog_, IDC_CTRL_SIDE), draft_.double_ctrl.enabled ? TRUE : FALSE);
         EnableWindow(GetDlgItem(dialog_, IDC_CURSOR_SCALE_PERCENT),
                      draft_.effects.enlarged_cursor_enabled ? TRUE : FALSE);
         SetDlgItemInt(dialog_, IDC_RADIUS_DIP, static_cast<UINT>(draft_.spotlight_radius_dip), FALSE);
         SetDlgItemInt(dialog_, IDC_DIM_OPACITY, draft_.dim_opacity_percent, FALSE);
         SetDlgItemInt(dialog_, IDC_CURSOR_SCALE_PERCENT, draft_.effects.cursor_scale_percent, FALSE);
+        const auto excluded_processes = format_excluded_processes(draft_.activation_policy.excluded_processes);
+        SetDlgItemTextW(dialog_, IDC_EXCLUDED_PROCESSES, excluded_processes.c_str());
 
         set_hotkey_controls(draft_.hotkey);
         set_hotkey_controls_enabled(draft_.hotkey.enabled);
@@ -265,12 +411,14 @@ class SettingsDialog final
             (control == IDC_SHAKE_ENABLED || control == IDC_DOUBLE_CTRL_ENABLED || control == IDC_HOTKEY_ENABLED ||
              control == IDC_HOTKEY_WINDOWS || control == IDC_AUTO_TIMEOUT_ENABLED ||
              control == IDC_FOCUS_RING_ENABLED || control == IDC_RIPPLE_ENABLED || control == IDC_CROSSHAIR_ENABLED ||
-             control == IDC_ENLARGED_CURSOR_ENABLED);
+             control == IDC_ENLARGED_CURSOR_ENABLED || control == IDC_STARTUP_ENABLED);
         const bool combo_changed =
-            (control == IDC_CTRL_SIDE || control == IDC_SPOTLIGHT_SHAPE) && notification == CBN_SELCHANGE;
+            (control == IDC_CTRL_SIDE || control == IDC_SPOTLIGHT_SHAPE || control == IDC_FULLSCREEN_SUPPRESSION) &&
+            notification == CBN_SELCHANGE;
         const bool edit_changed =
-            notification == EN_CHANGE && (control == IDC_RADIUS_DIP || control == IDC_DIM_OPACITY ||
-                                          control == IDC_HOTKEY_CAPTURE || control == IDC_CURSOR_SCALE_PERCENT);
+            notification == EN_CHANGE &&
+            (control == IDC_RADIUS_DIP || control == IDC_DIM_OPACITY || control == IDC_HOTKEY_CAPTURE ||
+             control == IDC_CURSOR_SCALE_PERCENT || control == IDC_EXCLUDED_PROCESSES);
         if (!initializing_ && (checkbox_changed || combo_changed || edit_changed))
         {
             dirty_ = true;
@@ -310,8 +458,19 @@ class SettingsDialog final
 
         const LRESULT side = SendDlgItemMessageW(dialog_, IDC_CTRL_SIDE, CB_GETCURSEL, 0, 0);
         const LRESULT shape = SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_GETCURSEL, 0, 0);
-        if (side < 0 || side > 2 || shape < 0 || shape > 2)
+        const LRESULT fullscreen_suppression =
+            SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_GETCURSEL, 0, 0);
+        if (side < 0 || side > 2 || shape < 0 || shape > 2 || fullscreen_suppression < 0 || fullscreen_suppression > 2)
         {
+            return false;
+        }
+
+        const auto excluded_processes = read_excluded_processes(dialog_);
+        if (!excluded_processes)
+        {
+            MessageBoxW(dialog_, L"排除程序只能填写 EXE 文件名，最多 64 个，并用分号分隔。", L"ZMouseShow 设置",
+                        MB_OK | MB_ICONWARNING);
+            SetFocus(GetDlgItem(dialog_, IDC_EXCLUDED_PROCESSES));
             return false;
         }
 
@@ -339,6 +498,12 @@ class SettingsDialog final
         settings.effects.enlarged_cursor_enabled =
             IsDlgButtonChecked(dialog_, IDC_ENLARGED_CURSOR_ENABLED) == BST_CHECKED;
         settings.effects.cursor_scale_percent = cursor_scale;
+        settings.activation_policy.fullscreen_suppression =
+            fullscreen_suppression == 0   ? policy::FullscreenSuppression::automatic
+            : fullscreen_suppression == 1 ? policy::FullscreenSuppression::off
+                                          : policy::FullscreenSuppression::strict;
+        settings.activation_policy.excluded_processes = *excluded_processes;
+        settings.startup_enabled = IsDlgButtonChecked(dialog_, IDC_STARTUP_ENABLED) == BST_CHECKED;
         settings.double_ctrl.side = side == 0   ? input::ControlSide::left
                                     : side == 1 ? input::ControlSide::right
                                                 : input::ControlSide::either;
