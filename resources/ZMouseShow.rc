@@ -43,7 +43,7 @@ BEGIN
     LTEXT           "全屏抑制(&M)：", -1, 18, 323, 72, 12
     COMBOBOX        IDC_FULLSCREEN_SUPPRESSION, 92, 320, 102, 60, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     CONTROL         "登录后自启动(&B)", IDC_STARTUP_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 204, 322, 104, 14
-    LTEXT           "排除程序(&X)：", -1, 18, 346, 72, 12
+    LTEXT           "排除程序(&E)：", -1, 18, 346, 72, 12
     EDITTEXT        IDC_EXCLUDED_PROCESSES, 92, 343, 216, 14, ES_AUTOHSCROLL | WS_TABSTOP
     LTEXT           "仅填写 EXE 文件名，多个名称用分号分隔。", -1, 92, 360, 216, 10
 
