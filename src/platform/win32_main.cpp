@@ -223,9 +223,9 @@ class Application final
 
     int run()
     {
-        if (const auto loaded = zmouse::config::load_toml(config_path_))
+        if (auto loaded = zmouse::config::load_toml(config_path_))
         {
-            apply_settings(*loaded);
+            apply_settings(std::move(*loaded));
         }
         else
         {
@@ -475,23 +475,23 @@ class Application final
         schedule_overlay_timer();
     }
 
-    void apply_settings(const zmouse::config::Settings& settings) noexcept
+    void apply_settings(zmouse::config::Settings settings) noexcept
     {
         if (window_ != nullptr)
         {
             hide_overlay_immediately();
         }
 
-        settings_ = settings;
-        shake_enabled_ = settings.shake_enabled;
-        auto_timeout_enabled_ = settings.auto_timeout_enabled;
-        overlay_idle_timeout_ms_ = settings.idle_timeout_ms;
-        overlay_max_duration_ms_ = settings.maximum_duration_ms;
-        double_ctrl_detector_.configure(settings.double_ctrl);
-        hotkey_detector_.configure(settings.hotkey);
-        shake_detector_.configure(settings.shake);
-        overlay_manager_.configure(settings.spotlight_radius_dip, settings.spotlight_shape, settings.effects,
-                                   settings.dim_opacity_percent);
+        settings_ = std::move(settings);
+        shake_enabled_ = settings_.shake_enabled;
+        auto_timeout_enabled_ = settings_.auto_timeout_enabled;
+        overlay_idle_timeout_ms_ = settings_.idle_timeout_ms;
+        overlay_max_duration_ms_ = settings_.maximum_duration_ms;
+        double_ctrl_detector_.configure(settings_.double_ctrl);
+        hotkey_detector_.configure(settings_.hotkey);
+        shake_detector_.configure(settings_.shake);
+        overlay_manager_.configure(settings_.spotlight_radius_dip, settings_.spotlight_shape, settings_.effects,
+                                   settings_.dim_opacity_percent);
     }
 
     [[nodiscard]] bool prepare_hotkey_registration(const zmouse::input::HotkeyConfig& config,
@@ -537,7 +537,7 @@ class Application final
 
     void reload_configuration() noexcept
     {
-        const auto loaded = zmouse::config::load_toml(config_path_);
+        auto loaded = zmouse::config::load_toml(config_path_);
         if (!loaded)
         {
             show_tray_notification(L"ZMouseShow", L"配置重新加载失败，已保留当前设置。", NIIF_WARNING);
@@ -549,7 +549,7 @@ class Application final
             show_tray_notification(L"ZMouseShow", L"新的自定义组合键已被占用，已保留当前设置。", NIIF_WARNING);
             return;
         }
-        apply_settings(*loaded);
+        apply_settings(std::move(*loaded));
         show_tray_notification(L"ZMouseShow", L"配置已重新加载。", NIIF_INFO);
     }
 
@@ -626,6 +626,15 @@ class Application final
     static bool apply_dialog_settings(void* context, const zmouse::config::Settings& settings) noexcept
     {
         auto& application = *static_cast<Application*>(context);
+        zmouse::config::Settings replacement_settings;
+        try
+        {
+            replacement_settings = settings;
+        }
+        catch (...)
+        {
+            return false;
+        }
         zmouse::platform::GlobalHotkeyRegistration replacement;
         bool hotkey_changed = false;
         if (!application.prepare_hotkey_registration(settings.hotkey, replacement, hotkey_changed))
@@ -643,7 +652,7 @@ class Application final
             return false;
         }
         application.commit_hotkey_registration(std::move(replacement), hotkey_changed, settings.hotkey);
-        application.apply_settings(settings);
+        application.apply_settings(std::move(replacement_settings));
         return true;
     }
 

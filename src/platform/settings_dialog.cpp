@@ -214,7 +214,7 @@ namespace
 class SettingsDialog final
 {
   public:
-    SettingsDialog(config::Settings settings, const ApplySettingsCallback apply, void* context) noexcept
+    SettingsDialog(config::Settings settings, const ApplySettingsCallback apply, void* context)
         : applied_(settings), draft_(settings), apply_(apply), context_(context)
     {
     }
@@ -624,16 +624,24 @@ bool show_settings_dialog(const HINSTANCE instance, const HWND owner, const conf
         MessageBoxW(owner, L"无法初始化原生设置控件。", L"ZMouseShow", MB_OK | MB_ICONERROR);
         return false;
     }
-    SettingsDialog dialog(settings, apply, context);
-    SetLastError(ERROR_SUCCESS);
-    const INT_PTR result = dialog.show(instance, owner);
-    if (result == -1)
+    try
     {
-        wchar_t message[128]{};
-        static_cast<void>(swprintf_s(message, L"无法创建设置窗口（Win32 错误 %lu）。", GetLastError()));
-        MessageBoxW(owner, message, L"ZMouseShow", MB_OK | MB_ICONERROR);
+        SettingsDialog dialog(settings, apply, context);
+        SetLastError(ERROR_SUCCESS);
+        const INT_PTR result = dialog.show(instance, owner);
+        if (result == -1)
+        {
+            wchar_t message[128]{};
+            static_cast<void>(swprintf_s(message, L"无法创建设置窗口（Win32 错误 %lu）。", GetLastError()));
+            MessageBoxW(owner, message, L"ZMouseShow", MB_OK | MB_ICONERROR);
+            return false;
+        }
+        return true;
+    }
+    catch (...)
+    {
+        MessageBoxW(owner, L"无法分配设置窗口所需的内存。", L"ZMouseShow", MB_OK | MB_ICONERROR);
         return false;
     }
-    return true;
 }
 } // namespace zmouse::platform
