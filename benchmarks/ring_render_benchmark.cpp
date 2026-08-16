@@ -32,8 +32,12 @@ struct Result
 {
     double total_ms{};
     double mean_frame_us{};
+    double median_frame_us{};
     double p95_frame_us{};
+    double p99_frame_us{};
+    double worst_frame_us{};
     double surface_mib{};
+    std::uint64_t surface_allocations{};
     std::uint64_t checksum{};
 };
 
@@ -77,10 +81,16 @@ void legacy_rasterize(std::span<std::uint32_t> pixels, const std::int32_t size, 
 }
 
 [[nodiscard]] Result summarize(std::vector<double> frame_times_us, const Clock::duration total,
-                               const std::size_t surface_bytes, const std::uint64_t checksum)
+                               const std::size_t surface_bytes, const std::uint64_t surface_allocations,
+                               const std::uint64_t checksum)
 {
     std::ranges::sort(frame_times_us);
-    const auto p95_index = static_cast<std::size_t>(std::ceil(static_cast<double>(frame_times_us.size()) * 0.95) - 1.0);
+    const auto percentile = [&](const double value)
+    {
+        const auto index =
+            static_cast<std::size_t>(std::ceil(static_cast<double>(frame_times_us.size()) * value) - 1.0);
+        return frame_times_us[(std::min)(index, frame_times_us.size() - 1)];
+    };
     double sum = 0.0;
     for (const double duration : frame_times_us)
     {
@@ -89,8 +99,12 @@ void legacy_rasterize(std::span<std::uint32_t> pixels, const std::int32_t size, 
     return {
         .total_ms = std::chrono::duration<double, std::milli>(total).count(),
         .mean_frame_us = sum / static_cast<double>(frame_times_us.size()),
-        .p95_frame_us = frame_times_us[(std::min)(p95_index, frame_times_us.size() - 1)],
+        .median_frame_us = percentile(0.50),
+        .p95_frame_us = percentile(0.95),
+        .p99_frame_us = percentile(0.99),
+        .worst_frame_us = frame_times_us.back(),
         .surface_mib = static_cast<double>(surface_bytes) / (1024.0 * 1024.0),
+        .surface_allocations = surface_allocations,
         .checksum = checksum,
     };
 }
@@ -118,7 +132,8 @@ void legacy_rasterize(std::span<std::uint32_t> pixels, const std::int32_t size, 
                        pixels[static_cast<std::size_t>((size / 2) * size + size / 2 + radius)];
         }
     }
-    return summarize(std::move(frame_times_us), Clock::now() - total_start, maximum_bytes, checksum);
+    return summarize(std::move(frame_times_us), Clock::now() - total_start, maximum_bytes,
+                     static_cast<std::uint64_t>(animations) * frame_count, checksum);
 }
 
 [[nodiscard]] Result benchmark_persistent(const Scenario& scenario, const std::int32_t animations)
@@ -161,7 +176,7 @@ void legacy_rasterize(std::span<std::uint32_t> pixels, const std::int32_t size, 
             previous_size = size;
         }
     }
-    return summarize(std::move(frame_times_us), Clock::now() - total_start, pixels.size() * sizeof(std::uint32_t),
+    return summarize(std::move(frame_times_us), Clock::now() - total_start, pixels.size() * sizeof(std::uint32_t), 1,
                      checksum);
 }
 
@@ -180,7 +195,9 @@ void print_result(const Scenario& scenario, const char* implementation, const st
 {
     std::cout << scenario.name << ',' << implementation << ',' << animations << ',' << animations * frame_count << ','
               << std::fixed << std::setprecision(3) << result.total_ms << ',' << result.mean_frame_us << ','
-              << result.p95_frame_us << ',' << result.surface_mib << ',' << result.checksum << '\n';
+              << result.median_frame_us << ',' << result.p95_frame_us << ',' << result.p99_frame_us << ','
+              << result.worst_frame_us << ',' << result.surface_mib << ',' << result.surface_allocations << ','
+              << result.checksum << '\n';
 }
 } // namespace
 
@@ -189,10 +206,14 @@ int main(const int argument_count, char** arguments)
     const auto animations = parse_animations(argument_count, arguments);
     constexpr Scenario scenarios[]{
         {.name = "96dpi-radius120", .base_radius = 120, .margin = 18, .stroke = 5},
+        {.name = "125dpi-radius150", .base_radius = 150, .margin = 23, .stroke = 6},
         {.name = "150dpi-radius180", .base_radius = 180, .margin = 27, .stroke = 7},
+        {.name = "200dpi-radius240", .base_radius = 240, .margin = 36, .stroke = 10},
+        {.name = "maximum-radius512", .base_radius = 512, .margin = 48, .stroke = 12},
     };
 
-    std::cout << "scenario,implementation,animations,frames,total_ms,mean_frame_us,p95_frame_us,surface_mib,checksum\n";
+    std::cout << "scenario,implementation,animations,frames,total_ms,mean_frame_us,median_frame_us,p95_frame_us,"
+                 "p99_frame_us,worst_frame_us,surface_mib,surface_allocations,checksum\n";
     for (const auto& scenario : scenarios)
     {
         print_result(scenario, "legacy-full-raster", animations, benchmark_legacy(scenario, animations));

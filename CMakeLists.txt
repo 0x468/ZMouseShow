@@ -134,4 +134,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(zmouse_render_benchmark PRIVATE ZMouseShow::Core)
     zmouse_apply_project_options(zmouse_render_benchmark)
+
+    add_executable(zmouse_overlay_benchmark
+        benchmarks/win32_overlay_benchmark.cpp
+    )
+    target_link_libraries(zmouse_overlay_benchmark PRIVATE ZMouseShow::Core gdi32 psapi user32)
+    zmouse_apply_project_options(zmouse_overlay_benchmark)
 endif()
