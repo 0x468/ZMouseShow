@@ -3,6 +3,7 @@
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/hotkey_detector.hpp"
 #include "zmouse/input/shake_detector.hpp"
+#include "zmouse/magnifier/settings.hpp"
 #include "zmouse/overlay/spotlight_shape.hpp"
 #include "zmouse/overlay/visual_effects.hpp"
 #include "zmouse/policy/activation_policy.hpp"
@@ -21,6 +22,7 @@ struct Settings
     std::int32_t spotlight_radius_dip{120};
     overlay::SpotlightShape spotlight_shape{overlay::SpotlightShape::circle};
     std::uint32_t dim_opacity_percent{60};
+    bool dim_enabled{true};
     std::uint64_t idle_timeout_ms{1'200};
     std::uint64_t maximum_duration_ms{5'000};
 
@@ -30,6 +32,7 @@ struct Settings
     overlay::VisualEffects effects{};
     policy::ActivationPolicyConfig activation_policy{};
     bool startup_enabled{};
+    magnifier::Settings magnifier{};
 };
 
 [[nodiscard]] std::optional<Settings> parse_toml(std::string_view text) noexcept;

@@ -15,7 +15,9 @@
 #include "zmouse/input/overlay_input_rules.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
+#include "zmouse/platform/desktop_duplication_capture.hpp"
 #include "zmouse/platform/global_hotkey_registration.hpp"
+#include "zmouse/platform/magnifier_window.hpp"
 #include <array>
 #include <bitset>
 #include <cstddef>
@@ -215,6 +217,7 @@ class Application final
     ~Application()
     {
         hotkey_registration_.reset();
+        stop_magnifier_capture();
         stop_animation_timer();
         if (animation_timer_ != nullptr)
         {
@@ -234,7 +237,8 @@ class Application final
         }
 
         taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
-        if (!create_window() || !overlay_manager_.initialize(instance_) || !register_raw_input())
+        if (!create_window() || !overlay_manager_.initialize(instance_) || !magnifier_window_.initialize(instance_) ||
+            !register_raw_input())
         {
             if (window_ != nullptr)
             {
@@ -563,8 +567,26 @@ class Application final
         double_ctrl_detector_.configure(settings_.double_ctrl);
         hotkey_detector_.configure(settings_.hotkey);
         shake_detector_.configure(settings_.shake);
-        overlay_manager_.configure(settings_.spotlight_radius_dip, settings_.spotlight_shape, settings_.effects,
-                                   settings_.dim_opacity_percent);
+        BOOL animations_enabled = TRUE;
+        static_cast<void>(SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations_enabled, 0));
+        auto overlay_effects = settings_.effects;
+        auto magnifier_settings = settings_.magnifier;
+        if (animations_enabled == FALSE)
+        {
+            overlay_effects.ripple_enabled = false;
+            magnifier_settings.edge_effect = zmouse::magnifier::EdgeEffect::off;
+        }
+        if (settings_.magnifier.enabled)
+        {
+            overlay_effects.enlarged_cursor_enabled = false;
+        }
+        overlay_manager_.configure(settings_.spotlight_radius_dip, settings_.spotlight_shape, overlay_effects,
+                                   settings_.dim_opacity_percent, settings_.dim_enabled);
+        magnifier_window_.configure(magnifier_settings);
+        if (!settings_.magnifier.enabled)
+        {
+            stop_magnifier_capture();
+        }
     }
 
     [[nodiscard]] bool prepare_hotkey_registration(const zmouse::input::HotkeyConfig& config,
@@ -678,6 +700,8 @@ class Application final
                                     virtual_top + GetSystemMetrics(SM_CYVIRTUALSCREEN)},
                 .monitors = std::move(collection.monitors),
                 .settings = settings_,
+                .capture =
+                    magnifier_capture_ != nullptr ? magnifier_capture_->diagnostics() : zmouse::capture::Diagnostics{},
             };
             if (!zmouse::diagnostics::write_report(report_path, snapshot))
             {
@@ -772,9 +796,12 @@ class Application final
             return;
         }
 
+        update_magnifier_capture({cursor.x, cursor.y});
+
         overlay_started_at_ = now;
         last_cursor_move_at_ = now;
         last_cursor_position_ = position;
+        cursor_update_pending_ = false;
         double_ctrl_detector_.reset();
         shake_detector_.reset();
         schedule_overlay_timer();
@@ -804,6 +831,7 @@ class Application final
         if (!overlay_manager_.visible())
         {
             static_cast<void>(KillTimer(window_, overlay_timer_id));
+            stop_magnifier_capture();
             return;
         }
 
@@ -821,7 +849,9 @@ class Application final
     {
         activation_pending_ = false;
         overlay_manager_.hide();
+        stop_magnifier_capture();
         locator_animation_.reset();
+        cursor_update_pending_ = false;
         stop_animation_timer();
         static_cast<void>(KillTimer(window_, overlay_timer_id));
         double_ctrl_detector_.reset();
@@ -881,7 +911,7 @@ class Application final
         const auto phase = locator_animation_.phase();
         const bool animating = phase == zmouse::overlay::AnimationPhase::appearing ||
                                phase == zmouse::overlay::AnimationPhase::disappearing;
-        if (animating)
+        if (animating || cursor_update_pending_)
         {
             static_cast<void>(KillTimer(window_, overlay_timer_id));
             if (!start_animation_timer())
@@ -903,6 +933,7 @@ class Application final
 
     void update_overlay_cursor() noexcept
     {
+        cursor_update_pending_ = false;
         if (!overlay_manager_.visible())
         {
             return;
@@ -918,12 +949,14 @@ class Application final
         const zmouse::overlay::Point position{cursor.x, cursor.y};
         if (position == last_cursor_position_)
         {
+            update_magnifier_capture(position);
             return;
         }
 
         last_cursor_position_ = position;
         last_cursor_move_at_ = GetTickCount64();
         overlay_manager_.move_to(position);
+        update_magnifier_capture(position);
         if (!overlay_manager_.visible())
         {
             hide_overlay_immediately();
@@ -967,6 +1000,88 @@ class Application final
             return;
         }
         schedule_overlay_timer();
+    }
+
+    void stop_magnifier_capture() noexcept
+    {
+        if (magnifier_capture_ != nullptr)
+        {
+            magnifier_capture_->stop();
+            magnifier_capture_.reset();
+        }
+        magnifier_monitor_ = nullptr;
+        magnifier_retry_after_ = 0;
+        capture_exclusion_applied_ = false;
+        magnifier_window_.hide();
+    }
+
+    void update_magnifier_capture(const zmouse::overlay::Point position) noexcept
+    {
+        if (!settings_.magnifier.enabled)
+        {
+            return;
+        }
+        const ULONGLONG now = GetTickCount64();
+        if (now < magnifier_retry_after_)
+        {
+            return;
+        }
+        const HMONITOR monitor = MonitorFromPoint({position.x, position.y}, MONITOR_DEFAULTTONEAREST);
+        if (monitor == nullptr)
+        {
+            return;
+        }
+        if (magnifier_capture_ == nullptr)
+        {
+            magnifier_capture_ = std::make_unique<zmouse::platform::DesktopDuplicationCapture>();
+        }
+        if (magnifier_monitor_ != nullptr && magnifier_monitor_ != monitor)
+        {
+            magnifier_capture_->stop();
+            magnifier_monitor_ = nullptr;
+        }
+        // Exclude every app-owned visual before acquiring a frame. Continuing
+        // after a failed exclusion would allow recursive capture of our lens.
+        if (!capture_exclusion_applied_)
+        {
+            capture_exclusion_applied_ = zmouse::platform::exclude_window_from_capture(magnifier_window_.window()) &&
+                                         overlay_manager_.exclude_from_capture();
+        }
+        const bool exclusion_applied = capture_exclusion_applied_;
+        magnifier_capture_->mark_exclusion(exclusion_applied);
+        if (!exclusion_applied)
+        {
+            magnifier_capture_->stop();
+            magnifier_window_.hide();
+            magnifier_retry_after_ = now + 1'000;
+            return;
+        }
+        if (!magnifier_capture_->running() && !magnifier_capture_->start(monitor))
+        {
+            // Capture failure is a safe degradation: P3 remains visible and the
+            // next movement/timer tick may retry after a topology change.
+            magnifier_retry_after_ = now + 1'000;
+            return;
+        }
+        magnifier_monitor_ = monitor;
+        UINT dpi_x = 96;
+        UINT dpi_y = 96;
+        static_cast<void>(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y));
+        if (!magnifier_window_.render(*magnifier_capture_, {position.x, position.y}, dpi_x))
+        {
+            const auto failure = magnifier_capture_->diagnostics().last_failure;
+            if (failure != zmouse::capture::FailureCategory::timeout &&
+                failure != zmouse::capture::FailureCategory::none)
+            {
+                magnifier_capture_->stop();
+                magnifier_monitor_ = nullptr;
+                magnifier_retry_after_ = now + 1'000;
+            }
+        }
+        else
+        {
+            magnifier_retry_after_ = 0;
+        }
     }
 
     LRESULT handle_message(const UINT message, const WPARAM w_param, const LPARAM l_param) noexcept
@@ -1052,6 +1167,7 @@ class Application final
             break;
 
         case WM_DISPLAYCHANGE:
+            stop_magnifier_capture();
             if (!overlay_manager_.rebuild())
             {
                 hide_overlay_immediately();
@@ -1263,7 +1379,8 @@ class Application final
 
         if (overlay_manager_.visible() && (mouse.lLastX != 0 || mouse.lLastY != 0))
         {
-            update_overlay_cursor();
+            cursor_update_pending_ = true;
+            schedule_overlay_timer();
         }
 
         if (!zmouse::input::triggers_armed(input_state()) || !shake_enabled_ ||
@@ -1318,16 +1435,22 @@ class Application final
     ULONGLONG overlay_started_at_{};
     ULONGLONG last_cursor_move_at_{};
     zmouse::overlay::Point last_cursor_position_{};
+    bool cursor_update_pending_{};
     zmouse::input::DoubleCtrlDetector double_ctrl_detector_{};
     zmouse::input::HotkeyDetector hotkey_detector_{};
     zmouse::platform::GlobalHotkeyRegistration hotkey_registration_{};
     zmouse::input::ShakeDetector shake_detector_{};
     zmouse::overlay::LocatorAnimation locator_animation_{};
     zmouse::platform::OverlayManager overlay_manager_{};
+    zmouse::platform::MagnifierWindow magnifier_window_{};
+    std::unique_ptr<zmouse::platform::DesktopDuplicationCapture> magnifier_capture_{};
+    HMONITOR magnifier_monitor_{};
+    ULONGLONG magnifier_retry_after_{};
+    bool capture_exclusion_applied_{};
 };
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
+int WINAPI wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 {
     static_cast<void>(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
 

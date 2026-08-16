@@ -294,6 +294,20 @@ class SettingsDialog final
                                               reinterpret_cast<LPARAM>(L"关闭")));
         static_cast<void>(SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_ADDSTRING, 0,
                                               reinterpret_cast<LPARAM>(L"严格（抑制全部）")));
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_SHAPE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"圆形")));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_SHAPE, CB_ADDSTRING, 0,
+                                              reinterpret_cast<LPARAM>(L"大圆角矩形")));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_EDGE_EFFECT, CB_ADDSTRING, 0,
+                                              reinterpret_cast<LPARAM>(L"关闭")));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_EDGE_EFFECT, CB_ADDSTRING, 0,
+                                              reinterpret_cast<LPARAM>(L"细微高光")));
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_LOCATOR_MODE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"聚焦")));
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_LOCATOR_MODE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"放大")));
+        static_cast<void>(
+            SendDlgItemMessageW(dialog_, IDC_LOCATOR_MODE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"聚焦 + 放大")));
 
         static_cast<void>(
             SendDlgItemMessageW(dialog_, IDC_SHAKE_SENSITIVITY, TBM_SETRANGE, TRUE,
@@ -356,10 +370,15 @@ class SettingsDialog final
         CheckDlgButton(dialog_, IDC_ENLARGED_CURSOR_ENABLED,
                        settings.effects.enlarged_cursor_enabled ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog_, IDC_STARTUP_ENABLED, settings.startup_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_DIM_ENABLED, settings.dim_enabled ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog_, IDC_MAGNIFIER_ENABLED, settings.magnifier.enabled ? BST_CHECKED : BST_UNCHECKED);
+        update_locator_mode(settings.dim_enabled, settings.magnifier.enabled);
 
         EnableWindow(GetDlgItem(dialog_, IDC_CTRL_SIDE), settings.double_ctrl.enabled ? TRUE : FALSE);
         EnableWindow(GetDlgItem(dialog_, IDC_CURSOR_SCALE_PERCENT),
                      settings.effects.enlarged_cursor_enabled ? TRUE : FALSE);
+        set_magnifier_controls_enabled(settings.magnifier.enabled);
+        set_dim_controls_enabled(settings.dim_enabled);
         set_shake_controls_enabled(settings.shake_enabled);
         static_cast<void>(SendDlgItemMessageW(dialog_, IDC_SHAKE_SENSITIVITY, TBM_SETPOS, TRUE,
                                               input::shake_sensitivity_for_distance(settings.shake.minimum_distance)));
@@ -368,6 +387,13 @@ class SettingsDialog final
         SetDlgItemInt(dialog_, IDC_RADIUS_DIP, static_cast<UINT>(settings.spotlight_radius_dip), FALSE);
         SetDlgItemInt(dialog_, IDC_DIM_OPACITY, settings.dim_opacity_percent, FALSE);
         SetDlgItemInt(dialog_, IDC_CURSOR_SCALE_PERCENT, settings.effects.cursor_scale_percent, FALSE);
+        SetDlgItemInt(dialog_, IDC_MAGNIFIER_ZOOM, settings.magnifier.zoom_percent, FALSE);
+        SetDlgItemInt(dialog_, IDC_MAGNIFIER_DIAMETER, settings.magnifier.diameter_dip, FALSE);
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_SHAPE, CB_SETCURSEL,
+                                              settings.magnifier.shape == magnifier::Shape::rounded_rectangle ? 1 : 0,
+                                              0));
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_EDGE_EFFECT, CB_SETCURSEL,
+                                              settings.magnifier.edge_effect == magnifier::EdgeEffect::off ? 0 : 1, 0));
         const auto excluded_processes = format_excluded_processes(settings.activation_policy.excluded_processes);
         SetDlgItemTextW(dialog_, IDC_EXCLUDED_PROCESSES, excluded_processes.c_str());
 
@@ -454,6 +480,38 @@ class SettingsDialog final
             const bool enabled = IsDlgButtonChecked(dialog_, IDC_ENLARGED_CURSOR_ENABLED) == BST_CHECKED;
             EnableWindow(GetDlgItem(dialog_, IDC_CURSOR_SCALE_PERCENT), enabled ? TRUE : FALSE);
         }
+        if (control == IDC_MAGNIFIER_ENABLED && notification == BN_CLICKED)
+        {
+            const bool enabled = IsDlgButtonChecked(dialog_, IDC_MAGNIFIER_ENABLED) == BST_CHECKED;
+            set_magnifier_controls_enabled(enabled);
+            if (enabled)
+            {
+                // Enabling the lens directly selects the low-overhead lens-only
+                // mode. The explicit "聚焦 + 放大" preset remains available.
+                CheckDlgButton(dialog_, IDC_DIM_ENABLED, BST_UNCHECKED);
+                set_dim_controls_enabled(false);
+            }
+            update_locator_mode(IsDlgButtonChecked(dialog_, IDC_DIM_ENABLED) == BST_CHECKED, enabled);
+        }
+        if (control == IDC_DIM_ENABLED && notification == BN_CLICKED)
+        {
+            const bool dim_enabled = IsDlgButtonChecked(dialog_, IDC_DIM_ENABLED) == BST_CHECKED;
+            set_dim_controls_enabled(dim_enabled);
+            update_locator_mode(dim_enabled, IsDlgButtonChecked(dialog_, IDC_MAGNIFIER_ENABLED) == BST_CHECKED);
+        }
+        if (control == IDC_LOCATOR_MODE && notification == CBN_SELCHANGE)
+        {
+            const LRESULT mode = SendDlgItemMessageW(dialog_, IDC_LOCATOR_MODE, CB_GETCURSEL, 0, 0);
+            if (mode >= 0 && mode <= 2)
+            {
+                const bool dim_enabled = mode != 1;
+                const bool magnifier_enabled = mode != 0;
+                CheckDlgButton(dialog_, IDC_DIM_ENABLED, dim_enabled ? BST_CHECKED : BST_UNCHECKED);
+                CheckDlgButton(dialog_, IDC_MAGNIFIER_ENABLED, magnifier_enabled ? BST_CHECKED : BST_UNCHECKED);
+                set_magnifier_controls_enabled(magnifier_enabled);
+                set_dim_controls_enabled(dim_enabled);
+            }
+        }
         if ((control == IDC_HOTKEY_CAPTURE && notification == EN_CHANGE) ||
             (control == IDC_HOTKEY_WINDOWS && notification == BN_CLICKED))
         {
@@ -466,14 +524,20 @@ class SettingsDialog final
              control == IDC_HOTKEY_WINDOWS || control == IDC_AUTO_TIMEOUT_ENABLED ||
              control == IDC_FOCUS_RING_ENABLED || control == IDC_RIPPLE_ENABLED || control == IDC_CROSSHAIR_ENABLED ||
              control == IDC_ENLARGED_CURSOR_ENABLED || control == IDC_STARTUP_ENABLED);
+        const bool p4_checkbox_changed =
+            notification == BN_CLICKED && (control == IDC_DIM_ENABLED || control == IDC_MAGNIFIER_ENABLED);
         const bool combo_changed =
-            (control == IDC_CTRL_SIDE || control == IDC_SPOTLIGHT_SHAPE || control == IDC_FULLSCREEN_SUPPRESSION) &&
+            (control == IDC_CTRL_SIDE || control == IDC_SPOTLIGHT_SHAPE || control == IDC_FULLSCREEN_SUPPRESSION ||
+             control == IDC_MAGNIFIER_SHAPE || control == IDC_MAGNIFIER_EDGE_EFFECT || control == IDC_LOCATOR_MODE) &&
             notification == CBN_SELCHANGE;
         const bool edit_changed =
             notification == EN_CHANGE &&
             (control == IDC_RADIUS_DIP || control == IDC_DIM_OPACITY || control == IDC_HOTKEY_CAPTURE ||
              control == IDC_CURSOR_SCALE_PERCENT || control == IDC_EXCLUDED_PROCESSES);
-        if (!initializing_ && (checkbox_changed || combo_changed || edit_changed))
+        const bool p4_edit_changed =
+            notification == EN_CHANGE && (control == IDC_MAGNIFIER_ZOOM || control == IDC_MAGNIFIER_DIAMETER);
+        if (!initializing_ &&
+            (checkbox_changed || p4_checkbox_changed || combo_changed || edit_changed || p4_edit_changed))
         {
             dirty_ = true;
             EnableWindow(GetDlgItem(dialog_, IDC_APPLY_SETTINGS), TRUE);
@@ -501,6 +565,23 @@ class SettingsDialog final
             return false;
         }
 
+        BOOL zoom_valid = FALSE;
+        const UINT zoom = GetDlgItemInt(dialog_, IDC_MAGNIFIER_ZOOM, &zoom_valid, FALSE);
+        if (zoom_valid == FALSE || zoom < 125 || zoom > 400)
+        {
+            MessageBoxW(dialog_, L"镜片倍率必须是 125–400%。", L"ZMouseShow 设置", MB_OK | MB_ICONWARNING);
+            SetFocus(GetDlgItem(dialog_, IDC_MAGNIFIER_ZOOM));
+            return false;
+        }
+        BOOL diameter_valid = FALSE;
+        const UINT diameter = GetDlgItemInt(dialog_, IDC_MAGNIFIER_DIAMETER, &diameter_valid, FALSE);
+        if (diameter_valid == FALSE || diameter < 160 || diameter > 640)
+        {
+            MessageBoxW(dialog_, L"镜片尺寸必须是 160–640 DIP。", L"ZMouseShow 设置", MB_OK | MB_ICONWARNING);
+            SetFocus(GetDlgItem(dialog_, IDC_MAGNIFIER_DIAMETER));
+            return false;
+        }
+
         BOOL cursor_scale_valid = FALSE;
         const UINT cursor_scale = GetDlgItemInt(dialog_, IDC_CURSOR_SCALE_PERCENT, &cursor_scale_valid, FALSE);
         if (cursor_scale_valid == FALSE || cursor_scale < 125 || cursor_scale > 400)
@@ -514,7 +595,11 @@ class SettingsDialog final
         const LRESULT shape = SendDlgItemMessageW(dialog_, IDC_SPOTLIGHT_SHAPE, CB_GETCURSEL, 0, 0);
         const LRESULT fullscreen_suppression =
             SendDlgItemMessageW(dialog_, IDC_FULLSCREEN_SUPPRESSION, CB_GETCURSEL, 0, 0);
-        if (side < 0 || side > 2 || shape < 0 || shape > 2 || fullscreen_suppression < 0 || fullscreen_suppression > 2)
+        const LRESULT magnifier_shape = SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_SHAPE, CB_GETCURSEL, 0, 0);
+        const LRESULT edge_effect = SendDlgItemMessageW(dialog_, IDC_MAGNIFIER_EDGE_EFFECT, CB_GETCURSEL, 0, 0);
+        if (side < 0 || side > 2 || shape < 0 || shape > 2 || fullscreen_suppression < 0 ||
+            fullscreen_suppression > 2 || magnifier_shape < 0 || magnifier_shape > 1 || edge_effect < 0 ||
+            edge_effect > 1)
         {
             return false;
         }
@@ -551,6 +636,14 @@ class SettingsDialog final
             return false;
         }
         settings.auto_timeout_enabled = IsDlgButtonChecked(dialog_, IDC_AUTO_TIMEOUT_ENABLED) == BST_CHECKED;
+        settings.dim_enabled = IsDlgButtonChecked(dialog_, IDC_DIM_ENABLED) == BST_CHECKED;
+        settings.magnifier.enabled = IsDlgButtonChecked(dialog_, IDC_MAGNIFIER_ENABLED) == BST_CHECKED;
+        settings.magnifier.zoom_percent = zoom;
+        settings.magnifier.diameter_dip = diameter;
+        settings.magnifier.shape =
+            magnifier_shape == 0 ? magnifier::Shape::circle : magnifier::Shape::rounded_rectangle;
+        settings.magnifier.follow_mode = magnifier::FollowMode::centered;
+        settings.magnifier.edge_effect = edge_effect == 0 ? magnifier::EdgeEffect::off : magnifier::EdgeEffect::subtle;
         settings.spotlight_radius_dip = static_cast<std::int32_t>(radius);
         settings.spotlight_shape = shape == 0   ? overlay::SpotlightShape::circle
                                    : shape == 1 ? overlay::SpotlightShape::rounded_square
@@ -643,6 +736,25 @@ class SettingsDialog final
     {
         EnableWindow(GetDlgItem(dialog_, IDC_HOTKEY_CAPTURE), enabled ? TRUE : FALSE);
         EnableWindow(GetDlgItem(dialog_, IDC_HOTKEY_WINDOWS), enabled ? TRUE : FALSE);
+    }
+
+    void set_magnifier_controls_enabled(const bool enabled) const noexcept
+    {
+        EnableWindow(GetDlgItem(dialog_, IDC_MAGNIFIER_ZOOM), enabled ? TRUE : FALSE);
+        EnableWindow(GetDlgItem(dialog_, IDC_MAGNIFIER_DIAMETER), enabled ? TRUE : FALSE);
+        EnableWindow(GetDlgItem(dialog_, IDC_MAGNIFIER_SHAPE), enabled ? TRUE : FALSE);
+        EnableWindow(GetDlgItem(dialog_, IDC_MAGNIFIER_EDGE_EFFECT), enabled ? TRUE : FALSE);
+    }
+
+    void set_dim_controls_enabled(const bool enabled) const noexcept
+    {
+        EnableWindow(GetDlgItem(dialog_, IDC_DIM_OPACITY), enabled ? TRUE : FALSE);
+    }
+
+    void update_locator_mode(const bool dim_enabled, const bool magnifier_enabled) const noexcept
+    {
+        const LRESULT mode = dim_enabled && magnifier_enabled ? 2 : dim_enabled ? 0 : magnifier_enabled ? 1 : -1;
+        static_cast<void>(SendDlgItemMessageW(dialog_, IDC_LOCATOR_MODE, CB_SETCURSEL, mode, 0));
     }
 
     void update_hotkey_summary() const

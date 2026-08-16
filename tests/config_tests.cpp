@@ -367,11 +367,17 @@ answer = 42
     settings.spotlight_radius_dip = 180;
     settings.spotlight_shape = zmouse::overlay::SpotlightShape::rounded_square;
     settings.dim_opacity_percent = 72;
+    settings.dim_enabled = false;
     settings.effects.focus_ring_enabled = false;
     settings.effects.ripple_enabled = false;
     settings.effects.crosshair_enabled = true;
     settings.effects.enlarged_cursor_enabled = true;
     settings.effects.cursor_scale_percent = 275;
+    settings.magnifier.enabled = true;
+    settings.magnifier.zoom_percent = 325;
+    settings.magnifier.diameter_dip = 420;
+    settings.magnifier.shape = zmouse::magnifier::Shape::rounded_rectangle;
+    settings.magnifier.edge_effect = zmouse::magnifier::EdgeEffect::off;
     settings.activation_policy.fullscreen_suppression = zmouse::policy::FullscreenSuppression::strict;
     settings.activation_policy.excluded_processes = {"game.exe", "presenter.exe"};
     settings.startup_enabled = true;
@@ -396,13 +402,19 @@ answer = 42
     check(contents.find("[custom]\nanswer = 42") != std::string::npos, "basic persistence keeps unknown tables");
     check(contents.find("[behavior]") != std::string::npos && contents.find("[startup]") != std::string::npos,
           "saving a P1-style file adds the P2 sections");
+    check(contents.find("[magnifier]") != std::string::npos, "saving an older file adds the P4 magnifier section");
 
     const auto loaded = zmouse::config::load_toml(path);
     check(loaded && loaded->shake_enabled && loaded->auto_timeout_enabled, "persisted general settings load back");
     check(loaded && loaded->spotlight_radius_dip == 180 &&
               loaded->spotlight_shape == zmouse::overlay::SpotlightShape::rounded_square &&
-              loaded->dim_opacity_percent == 72,
+              loaded->dim_opacity_percent == 72 && !loaded->dim_enabled,
           "persisted overlay settings load back");
+    check(loaded && loaded->magnifier.enabled && loaded->magnifier.zoom_percent == 325 &&
+              loaded->magnifier.diameter_dip == 420 &&
+              loaded->magnifier.shape == zmouse::magnifier::Shape::rounded_rectangle &&
+              loaded->magnifier.edge_effect == zmouse::magnifier::EdgeEffect::off,
+          "persisted P4 magnifier settings load back");
     check(loaded && !loaded->effects.focus_ring_enabled && !loaded->effects.ripple_enabled &&
               loaded->effects.crosshair_enabled && loaded->effects.enlarged_cursor_enabled &&
               loaded->effects.cursor_scale_percent == 275,
@@ -479,6 +491,13 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
                       .dpi_x = 120,
                       .dpi_y = 120,
                       .primary = false}},
+        .capture = {.available = true,
+                    .adapter = "Test Adapter",
+                    .output = "DISPLAY1",
+                    .format = "BGRA8",
+                    .last_failure = zmouse::capture::FailureCategory::access_lost,
+                    .exclusion_applied = true,
+                    .device_rebuild_count = 2},
     };
     snapshot.settings.double_ctrl.enabled = false;
     snapshot.settings.double_ctrl.side = zmouse::input::ControlSide::right;
@@ -510,6 +529,10 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
     check(report.find("effects.ripple_enabled: true") != std::string::npos &&
               report.find("effects.cursor_scale_percent: 200") != std::string::npos,
           "diagnostics report visual effect options");
+    check(report.find("capture.adapter: Test Adapter") != std::string::npos &&
+              report.find("capture.last_failure: access_lost") != std::string::npos &&
+              report.find("capture.device_rebuild_count: 2") != std::string::npos,
+          "diagnostics expose privacy-safe P4 capture state");
     check(report.find("behavior.fullscreen_suppression: strict") != std::string::npos &&
               report.find("behavior.excluded_processes[0]: game.exe") != std::string::npos &&
               report.find("startup.enabled: true") != std::string::npos,

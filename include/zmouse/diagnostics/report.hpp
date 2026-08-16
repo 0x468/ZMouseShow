@@ -1,6 +1,7 @@
 #pragma once
 
 #include "zmouse/config/settings.hpp"
+#include "zmouse/capture/capture_backend.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -44,6 +45,7 @@ struct Snapshot
     Rect virtual_desktop{};
     std::vector<Monitor> monitors;
     config::Settings settings{};
+    capture::Diagnostics capture{};
 };
 
 [[nodiscard]] std::string build_report(const Snapshot& snapshot);

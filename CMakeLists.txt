@@ -32,6 +32,7 @@ add_library(zmouse_core STATIC
     src/overlay/locator_animation.cpp
     src/policy/activation_policy.cpp
     src/render/cursor_compositor.cpp
+    src/render/pointer_shape.cpp
     src/render/ring_rasterizer.cpp
 )
 add_library(ZMouseShow::Core ALIAS zmouse_core)
@@ -48,8 +49,10 @@ zmouse_apply_project_options(zmouse_core)
 
 add_executable(ZMouseShow WIN32
     src/platform/display_simulator.cpp
+    src/platform/desktop_duplication_capture.cpp
     src/platform/foreground_context.cpp
     src/platform/global_hotkey_registration.cpp
+    src/platform/magnifier_window.cpp
     src/platform/overlay_manager.cpp
     src/platform/settings_dialog.cpp
     src/platform/spotlight_region.cpp
@@ -64,6 +67,10 @@ target_link_libraries(ZMouseShow
         ZMouseShow::Core
         advapi32
         comctl32
+        d3d11
+        d2d1
+        dcomp
+        dxgi
         dwmapi
         gdi32
         magnification
@@ -107,6 +114,13 @@ if(BUILD_TESTING)
     zmouse_apply_project_options(zmouse_cursor_compositor_tests)
     add_test(NAME cursor_compositor COMMAND zmouse_cursor_compositor_tests)
 
+    add_executable(zmouse_magnifier_tests
+        tests/magnifier_tests.cpp
+    )
+    target_link_libraries(zmouse_magnifier_tests PRIVATE ZMouseShow::Core)
+    zmouse_apply_project_options(zmouse_magnifier_tests)
+    add_test(NAME magnifier_geometry COMMAND zmouse_magnifier_tests)
+
     add_executable(zmouse_activation_policy_tests
         tests/activation_policy_tests.cpp
     )
@@ -141,4 +155,22 @@ if(BUILD_TESTING)
     )
     target_link_libraries(zmouse_overlay_benchmark PRIVATE ZMouseShow::Core gdi32 psapi user32)
     zmouse_apply_project_options(zmouse_overlay_benchmark)
+
+    add_executable(zmouse_magnifier_benchmark
+        benchmarks/magnifier_capture_benchmark.cpp
+        src/platform/desktop_duplication_capture.cpp
+        src/platform/magnifier_window.cpp
+    )
+    target_link_libraries(zmouse_magnifier_benchmark
+        PRIVATE
+            ZMouseShow::Core
+            d2d1
+            d3d11
+            dcomp
+            dxgi
+            psapi
+            shcore
+            user32
+    )
+    zmouse_apply_project_options(zmouse_magnifier_benchmark)
 endif()

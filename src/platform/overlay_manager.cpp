@@ -95,7 +95,8 @@ OverlayManager::~OverlayManager()
 }
 
 void OverlayManager::configure(const std::int32_t spotlight_radius_dip, const overlay::SpotlightShape spotlight_shape,
-                               const overlay::VisualEffects& effects, const std::uint32_t dim_opacity_percent) noexcept
+                               const overlay::VisualEffects& effects, const std::uint32_t dim_opacity_percent,
+                               const bool dim_enabled) noexcept
 {
     spotlight_radius_dip_ = (std::clamp)(spotlight_radius_dip, 32, 512);
     spotlight_shape_ = spotlight_shape;
@@ -105,7 +106,7 @@ void OverlayManager::configure(const std::int32_t spotlight_radius_dip, const ov
         restore_system_cursor();
     }
     const auto opacity = (std::clamp)(dim_opacity_percent, 10U, 90U);
-    dim_alpha_ = static_cast<BYTE>((opacity * 255U + 50U) / 100U);
+    dim_alpha_ = dim_enabled ? static_cast<BYTE>((opacity * 255U + 50U) / 100U) : 0U;
     destroy_ring_bitmap();
     destroy_cursor_bitmap();
 
@@ -259,6 +260,22 @@ void OverlayManager::hide() noexcept
 bool OverlayManager::visible() const noexcept
 {
     return visible_;
+}
+
+bool OverlayManager::exclude_from_capture() const noexcept
+{
+    if (ring_window_ == nullptr || cursor_window_ == nullptr)
+    {
+        return false;
+    }
+    bool applied = true;
+    for (const auto& overlay : overlays_)
+    {
+        applied = SetWindowDisplayAffinity(overlay.window, WDA_EXCLUDEFROMCAPTURE) != FALSE && applied;
+    }
+    applied = SetWindowDisplayAffinity(ring_window_, WDA_EXCLUDEFROMCAPTURE) != FALSE && applied;
+    applied = SetWindowDisplayAffinity(cursor_window_, WDA_EXCLUDEFROMCAPTURE) != FALSE && applied;
+    return applied;
 }
 
 LRESULT CALLBACK OverlayManager::overlay_window_proc(const HWND window, const UINT message, const WPARAM w_param,
@@ -419,6 +436,11 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
 
 bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const double scale)
 {
+    if (!effects_.focus_ring_enabled && !effects_.ripple_enabled && !effects_.crosshair_enabled)
+    {
+        return true;
+    }
+
     const auto ripple_radius = effects_.ripple_enabled ? animated_ring_radius(base_radius_px, scale) : 0;
     const auto margin = (std::max)(1, ring_margin_dip * base_radius_px / spotlight_radius_dip_);
     const auto stroke = (std::max)(2, ring_stroke_dip * base_radius_px / spotlight_radius_dip_);
@@ -543,33 +565,49 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const
     painted_focus_alpha_ = focus_alpha;
     painted_ripple_alpha_ = ripple_alpha;
     painted_crosshair_alpha_ = crosshair_alpha;
+    ring_bitmap_dirty_ = true;
     return true;
 }
 
-bool OverlayManager::update_ring_position(const overlay::Point cursor) const noexcept
+bool OverlayManager::update_ring_position(const overlay::Point cursor) noexcept
 {
-    if (ring_window_ == nullptr || ring_dc_ == nullptr)
+    if (ring_window_ == nullptr)
+    {
+        return false;
+    }
+    if (!effects_.focus_ring_enabled && !effects_.ripple_enabled && !effects_.crosshair_enabled)
+    {
+        ShowWindow(ring_window_, SW_HIDE);
+        return true;
+    }
+    if (ring_dc_ == nullptr)
     {
         return false;
     }
 
     POINT destination{cursor.x - ring_size_.cx / 2, cursor.y - ring_size_.cy / 2};
-    POINT source{};
-    SIZE size = ring_size_;
-    BLENDFUNCTION blend{
-        .BlendOp = AC_SRC_OVER,
-        .BlendFlags = 0,
-        .SourceConstantAlpha = 255,
-        .AlphaFormat = AC_SRC_ALPHA,
-    };
-    if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_dc_, &source, 0, &blend, ULW_ALPHA) ==
-        FALSE)
+    if (ring_bitmap_dirty_)
     {
-        return false;
+        POINT source{};
+        SIZE size = ring_size_;
+        BLENDFUNCTION blend{
+            .BlendOp = AC_SRC_OVER,
+            .BlendFlags = 0,
+            .SourceConstantAlpha = 255,
+            .AlphaFormat = AC_SRC_ALPHA,
+        };
+        if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_dc_, &source, 0, &blend, ULW_ALPHA) ==
+            FALSE)
+        {
+            return false;
+        }
+        ring_bitmap_dirty_ = false;
+        return SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
     }
 
-    return SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+    return SetWindowPos(ring_window_, HWND_TOPMOST, destination.x, destination.y, 0, 0,
+                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
 }
 
 bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)
@@ -832,6 +870,7 @@ void OverlayManager::destroy_ring_bitmap() noexcept
     painted_focus_alpha_ = 0;
     painted_ripple_alpha_ = 0;
     painted_crosshair_alpha_ = 0;
+    ring_bitmap_dirty_ = false;
 }
 
 void OverlayManager::destroy_cursor_bitmap() noexcept

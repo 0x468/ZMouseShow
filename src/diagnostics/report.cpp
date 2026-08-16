@@ -132,6 +132,15 @@ std::string build_report(const Snapshot& snapshot)
                << "]: " << settings.activation_policy.excluded_processes[index] << '\n';
     }
     report << "startup.enabled: " << boolean(settings.startup_enabled) << '\n'
+           << "overlay.dim_enabled: " << boolean(settings.dim_enabled) << '\n'
+           << "magnifier.enabled: " << boolean(settings.magnifier.enabled) << '\n'
+           << "magnifier.zoom_percent: " << settings.magnifier.zoom_percent << '\n'
+           << "magnifier.diameter_dip: " << settings.magnifier.diameter_dip << '\n'
+           << "magnifier.shape: "
+           << (settings.magnifier.shape == magnifier::Shape::rounded_rectangle ? "rounded_rectangle" : "circle") << '\n'
+           << "magnifier.follow_mode: centered\n"
+           << "magnifier.edge_effect: "
+           << (settings.magnifier.edge_effect == magnifier::EdgeEffect::off ? "off" : "subtle") << '\n'
            << "timeout.idle_ms: " << settings.idle_timeout_ms << '\n'
            << "timeout.maximum_duration_ms: " << settings.maximum_duration_ms << '\n'
            << "double_ctrl.enabled: " << boolean(settings.double_ctrl.enabled) << '\n'
@@ -150,6 +159,15 @@ std::string build_report(const Snapshot& snapshot)
            << "shake.minimum_path_to_diagonal_ratio: " << settings.shake.minimum_path_to_diagonal_ratio << '\n'
            << "shake.minimum_reversals: " << settings.shake.minimum_reversals << '\n'
            << "shake.cooldown_ms: " << settings.shake.cooldown_ms << "\n\n"
+           << "Capture backend\n"
+           << "----------------\n"
+           << "capture.available: " << boolean(snapshot.capture.available) << '\n'
+           << "capture.adapter: " << snapshot.capture.adapter << '\n'
+           << "capture.output: " << snapshot.capture.output << '\n'
+           << "capture.format: " << snapshot.capture.format << '\n'
+           << "capture.last_failure: " << capture::failure_name(snapshot.capture.last_failure) << '\n'
+           << "capture.exclusion_applied: " << boolean(snapshot.capture.exclusion_applied) << '\n'
+           << "capture.device_rebuild_count: " << snapshot.capture.device_rebuild_count << "\n\n"
            << "Privacy\n"
            << "-------\n"
            << "This report does not contain key history, pointer coordinates, or mouse movement history.\n";

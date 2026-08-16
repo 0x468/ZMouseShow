@@ -26,6 +26,7 @@ shake_enabled = false
 auto_timeout_enabled = false
 
 [overlay]
+dim_enabled = true
 radius_dip = 120
 shape = "circle"
 dim_opacity_percent = 60
@@ -36,6 +37,14 @@ ripple_enabled = true
 crosshair_enabled = false
 enlarged_cursor_enabled = false
 cursor_scale_percent = 200
+
+[magnifier]
+enabled = false
+zoom_percent = 200
+diameter_dip = 280
+shape = "circle"
+follow_mode = "centered"
+edge_effect = "subtle"
 
 [behavior]
 fullscreen_suppression = "automatic"
@@ -189,6 +198,47 @@ void assign_double(const toml::table& table, const std::string_view key, double&
     return std::nullopt;
 }
 
+[[nodiscard]] std::optional<magnifier::Shape> parse_magnifier_shape(const std::string_view value) noexcept
+{
+    if (value == "circle")
+    {
+        return magnifier::Shape::circle;
+    }
+    if (value == "rounded_rectangle")
+    {
+        return magnifier::Shape::rounded_rectangle;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::string_view magnifier_shape_name(const magnifier::Shape shape) noexcept
+{
+    return shape == magnifier::Shape::rounded_rectangle ? "rounded_rectangle" : "circle";
+}
+
+[[nodiscard]] std::optional<magnifier::FollowMode> parse_follow_mode(const std::string_view value) noexcept
+{
+    return value == "centered" ? std::optional{magnifier::FollowMode::centered} : std::nullopt;
+}
+
+[[nodiscard]] std::optional<magnifier::EdgeEffect> parse_edge_effect(const std::string_view value) noexcept
+{
+    if (value == "off")
+    {
+        return magnifier::EdgeEffect::off;
+    }
+    if (value == "subtle")
+    {
+        return magnifier::EdgeEffect::subtle;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::string_view edge_effect_name(const magnifier::EdgeEffect effect) noexcept
+{
+    return effect == magnifier::EdgeEffect::off ? "off" : "subtle";
+}
+
 [[nodiscard]] std::string_view spotlight_shape_name(const overlay::SpotlightShape shape) noexcept
 {
     switch (shape)
@@ -296,6 +346,10 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
 
     if (const auto* overlay = document["overlay"].as_table())
     {
+        if (const auto value = (*overlay)["dim_enabled"].value<bool>())
+        {
+            settings.dim_enabled = *value;
+        }
         assign_integer(*overlay, "radius_dip", settings.spotlight_radius_dip, 32, 512);
         if (const auto value = (*overlay)["shape"].value<std::string>())
         {
@@ -332,6 +386,37 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
             settings.effects.enlarged_cursor_enabled = *value;
         }
         assign_integer(*effects, "cursor_scale_percent", settings.effects.cursor_scale_percent, 125, 400);
+    }
+
+    if (const auto* magnifier = document["magnifier"].as_table())
+    {
+        if (const auto value = (*magnifier)["enabled"].value<bool>())
+        {
+            settings.magnifier.enabled = *value;
+        }
+        assign_integer(*magnifier, "zoom_percent", settings.magnifier.zoom_percent, 125, 400);
+        assign_integer(*magnifier, "diameter_dip", settings.magnifier.diameter_dip, 160, 640);
+        if (const auto value = (*magnifier)["shape"].value<std::string>())
+        {
+            if (const auto shape = parse_magnifier_shape(*value))
+            {
+                settings.magnifier.shape = *shape;
+            }
+        }
+        if (const auto value = (*magnifier)["follow_mode"].value<std::string>())
+        {
+            if (const auto mode = parse_follow_mode(*value))
+            {
+                settings.magnifier.follow_mode = *mode;
+            }
+        }
+        if (const auto value = (*magnifier)["edge_effect"].value<std::string>())
+        {
+            if (const auto effect = parse_edge_effect(*value))
+            {
+                settings.magnifier.edge_effect = *effect;
+            }
+        }
     }
 
     if (const auto* behavior = document["behavior"].as_table())
@@ -916,6 +1001,7 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
         updated = patch_value(updated, "hotkey", "shift", settings.hotkey.shift ? "true" : "false");
         updated = patch_value(updated, "hotkey", "windows", settings.hotkey.windows ? "true" : "false");
         updated = patch_value(updated, "overlay", "radius_dip", std::to_string(settings.spotlight_radius_dip));
+        updated = patch_value(updated, "overlay", "dim_enabled", settings.dim_enabled ? "true" : "false");
         updated = patch_value(updated, "overlay", "shape",
                               '"' + std::string(spotlight_shape_name(settings.spotlight_shape)) + '"');
         updated = patch_value(updated, "overlay", "dim_opacity_percent", std::to_string(settings.dim_opacity_percent));
@@ -928,6 +1014,14 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
                               settings.effects.enlarged_cursor_enabled ? "true" : "false");
         updated = patch_value(updated, "effects", "cursor_scale_percent",
                               std::to_string(settings.effects.cursor_scale_percent));
+        updated = patch_value(updated, "magnifier", "enabled", settings.magnifier.enabled ? "true" : "false");
+        updated = patch_value(updated, "magnifier", "zoom_percent", std::to_string(settings.magnifier.zoom_percent));
+        updated = patch_value(updated, "magnifier", "diameter_dip", std::to_string(settings.magnifier.diameter_dip));
+        updated = patch_value(updated, "magnifier", "shape",
+                              '"' + std::string(magnifier_shape_name(settings.magnifier.shape)) + '"');
+        updated = patch_value(updated, "magnifier", "follow_mode", "\"centered\"");
+        updated = patch_value(updated, "magnifier", "edge_effect",
+                              '"' + std::string(edge_effect_name(settings.magnifier.edge_effect)) + '"');
         updated = patch_value(
             updated, "behavior", "fullscreen_suppression",
             '"' + std::string(fullscreen_suppression_name(settings.activation_policy.fullscreen_suppression)) + '"');
@@ -959,13 +1053,19 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
             verified->hotkey.control != settings.hotkey.control || verified->hotkey.alt != settings.hotkey.alt ||
             verified->hotkey.shift != settings.hotkey.shift || verified->hotkey.windows != settings.hotkey.windows ||
             verified->spotlight_radius_dip != settings.spotlight_radius_dip ||
-            verified->spotlight_shape != settings.spotlight_shape ||
+            verified->dim_enabled != settings.dim_enabled || verified->spotlight_shape != settings.spotlight_shape ||
             verified->dim_opacity_percent != settings.dim_opacity_percent ||
             verified->effects.focus_ring_enabled != settings.effects.focus_ring_enabled ||
             verified->effects.ripple_enabled != settings.effects.ripple_enabled ||
             verified->effects.crosshair_enabled != settings.effects.crosshair_enabled ||
             verified->effects.enlarged_cursor_enabled != settings.effects.enlarged_cursor_enabled ||
             verified->effects.cursor_scale_percent != settings.effects.cursor_scale_percent ||
+            verified->magnifier.enabled != settings.magnifier.enabled ||
+            verified->magnifier.zoom_percent != settings.magnifier.zoom_percent ||
+            verified->magnifier.diameter_dip != settings.magnifier.diameter_dip ||
+            verified->magnifier.shape != settings.magnifier.shape ||
+            verified->magnifier.follow_mode != settings.magnifier.follow_mode ||
+            verified->magnifier.edge_effect != settings.magnifier.edge_effect ||
             verified->activation_policy.fullscreen_suppression != settings.activation_policy.fullscreen_suppression ||
             verified->activation_policy.excluded_processes != settings.activation_policy.excluded_processes ||
             verified->startup_enabled != settings.startup_enabled ||

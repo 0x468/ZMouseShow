@@ -19,7 +19,8 @@ class OverlayManager final
     ~OverlayManager();
 
     void configure(std::int32_t spotlight_radius_dip, overlay::SpotlightShape spotlight_shape,
-                   const overlay::VisualEffects& effects, std::uint32_t dim_opacity_percent) noexcept;
+                   const overlay::VisualEffects& effects, std::uint32_t dim_opacity_percent,
+                   bool dim_enabled = true) noexcept;
     [[nodiscard]] bool initialize(HINSTANCE instance);
     [[nodiscard]] bool rebuild();
     [[nodiscard]] bool show_at(overlay::Point cursor);
@@ -28,6 +29,7 @@ class OverlayManager final
     void hide() noexcept;
 
     [[nodiscard]] bool visible() const noexcept;
+    [[nodiscard]] bool exclude_from_capture() const noexcept;
 
   private:
     struct MonitorOverlay
@@ -50,7 +52,7 @@ class OverlayManager final
     [[nodiscard]] bool ensure_ring_bitmap(std::int32_t base_radius_px, double scale);
     [[nodiscard]] bool ensure_cursor_bitmap(UINT dpi);
     [[nodiscard]] bool hide_system_cursor();
-    [[nodiscard]] bool update_ring_position(overlay::Point cursor) const noexcept;
+    [[nodiscard]] bool update_ring_position(overlay::Point cursor) noexcept;
     [[nodiscard]] bool update_cursor_position(overlay::Point cursor);
     [[nodiscard]] UINT dpi_at(overlay::Point cursor) const noexcept;
     void apply_dim_progress() const noexcept;
@@ -77,6 +79,7 @@ class OverlayManager final
     std::uint8_t painted_focus_alpha_{};
     std::uint8_t painted_ripple_alpha_{};
     std::uint8_t painted_crosshair_alpha_{};
+    bool ring_bitmap_dirty_{};
     HWND cursor_window_{};
     HDC cursor_dc_{};
     HBITMAP cursor_bitmap_{};
