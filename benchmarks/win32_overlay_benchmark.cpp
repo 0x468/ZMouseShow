@@ -146,7 +146,8 @@ class DibSurface final
 class BenchmarkWindows final
 {
   public:
-    explicit BenchmarkWindows(const std::int32_t count)
+    BenchmarkWindows(const std::int32_t count, const std::int32_t width = surface_size,
+                     const std::int32_t height = surface_size)
     {
         const auto instance = GetModuleHandleW(nullptr);
         WNDCLASSEXW window_class{
@@ -163,9 +164,9 @@ class BenchmarkWindows final
         const auto offscreen_y = GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN) + 128;
         for (std::int32_t index = 0; index < count; ++index)
         {
-            const HWND window = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-                                                benchmark_window_class, L"", WS_POPUP, offscreen_x, offscreen_y,
-                                                surface_size, surface_size, nullptr, nullptr, instance, nullptr);
+            const HWND window =
+                CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, benchmark_window_class, L"",
+                                WS_POPUP, offscreen_x, offscreen_y, width, height, nullptr, nullptr, instance, nullptr);
             if (window == nullptr)
             {
                 return;
@@ -316,13 +317,13 @@ void paint_frame(const DibSurface& surface, const std::int32_t frame, std::int32
 
 [[nodiscard]] SampleSummary benchmark_region_holes(const std::int32_t window_count)
 {
-    BenchmarkWindows windows(window_count);
+    const auto width = (std::max)(1, GetSystemMetrics(SM_CXSCREEN));
+    const auto height = (std::max)(1, GetSystemMetrics(SM_CYSCREEN));
+    BenchmarkWindows windows(window_count, width, height);
     if (!windows.valid(window_count))
     {
         throw std::runtime_error("cannot create region benchmark windows");
     }
-    const auto width = (std::max)(1, GetSystemMetrics(SM_CXSCREEN));
-    const auto height = (std::max)(1, GetSystemMetrics(SM_CYSCREEN));
     std::vector<double> samples;
     samples.reserve(frame_count);
     const auto total_start = Clock::now();
