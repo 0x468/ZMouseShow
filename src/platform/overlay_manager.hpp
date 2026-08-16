@@ -49,6 +49,7 @@ class OverlayManager final
     [[nodiscard]] bool apply_hole(MonitorOverlay& overlay, overlay::Point cursor, std::int32_t radius_px);
     [[nodiscard]] bool ensure_ring_bitmap(std::int32_t base_radius_px, double scale);
     [[nodiscard]] bool ensure_cursor_bitmap(UINT dpi);
+    [[nodiscard]] bool hide_system_cursor();
     [[nodiscard]] bool update_ring_position(overlay::Point cursor) const noexcept;
     [[nodiscard]] bool update_cursor_position(overlay::Point cursor);
     [[nodiscard]] UINT dpi_at(overlay::Point cursor) const noexcept;
@@ -56,6 +57,8 @@ class OverlayManager final
     void destroy_windows() noexcept;
     void destroy_ring_bitmap() noexcept;
     void destroy_cursor_bitmap() noexcept;
+    void restore_system_cursor() noexcept;
+    void uninitialize_magnification() noexcept;
 
     HINSTANCE instance_{};
     ATOM overlay_class_{};
@@ -85,6 +88,8 @@ class OverlayManager final
     UINT rendered_cursor_dpi_{};
     std::uint32_t rendered_cursor_scale_percent_{};
     bool cursor_drawable_{};
+    bool magnification_initialized_{};
+    bool system_cursor_hidden_{};
     std::int32_t spotlight_radius_dip_{120};
     overlay::SpotlightShape spotlight_shape_{overlay::SpotlightShape::circle};
     overlay::VisualEffects effects_{};

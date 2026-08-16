@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <magnification.h>
 #include <span>
 
 namespace zmouse::platform
@@ -78,6 +79,7 @@ void destroy_dib_surface(HDC& dc, HBITMAP& bitmap, HGDIOBJ& old_bitmap, std::uin
 
 OverlayManager::~OverlayManager()
 {
+    restore_system_cursor();
     destroy_windows();
     destroy_ring_bitmap();
     destroy_cursor_bitmap();
@@ -89,6 +91,7 @@ OverlayManager::~OverlayManager()
     {
         UnregisterClassW(overlay_class_name, instance_);
     }
+    uninitialize_magnification();
 }
 
 void OverlayManager::configure(const std::int32_t spotlight_radius_dip, const overlay::SpotlightShape spotlight_shape,
@@ -97,6 +100,10 @@ void OverlayManager::configure(const std::int32_t spotlight_radius_dip, const ov
     spotlight_radius_dip_ = (std::clamp)(spotlight_radius_dip, 32, 512);
     spotlight_shape_ = spotlight_shape;
     effects_ = effects;
+    if (!effects_.enlarged_cursor_enabled)
+    {
+        restore_system_cursor();
+    }
     const auto opacity = (std::clamp)(dim_opacity_percent, 10U, 90U);
     dim_alpha_ = static_cast<BYTE>((opacity * 255U + 50U) / 100U);
     destroy_ring_bitmap();
@@ -241,6 +248,7 @@ void OverlayManager::hide() noexcept
     {
         ShowWindow(cursor_window_, SW_HIDE);
     }
+    restore_system_cursor();
     for (const auto& overlay : overlays_)
     {
         ShowWindow(overlay.window, SW_HIDE);
@@ -418,6 +426,7 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const
     const auto crosshair_arm = (std::max)(8, base_radius_px / 4);
     const auto crosshair_gap = (std::max)(4, base_radius_px / 14);
     const auto crosshair_thickness = (std::max)(2, stroke / 2);
+    const auto crosshair_outline = (std::max)(1, crosshair_thickness / 2);
     const auto focus_alpha =
         effects_.focus_ring_enabled ? static_cast<std::uint8_t>(std::lround(focus_opacity_ * 235.0)) : std::uint8_t{};
     const auto ripple_alpha =
@@ -484,41 +493,45 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const
         .stride = ring_bitmap_capacity_.cx,
     };
     if (painted_crosshair_alpha_ > 0 &&
-        !zmouse::render::paint_crosshair(surface, ring_size_.cx, ring_size_.cy, crosshair_arm, crosshair_gap,
-                                         crosshair_thickness, 0))
+        !zmouse::render::paint_contrast_crosshair(surface, ring_size_.cx, ring_size_.cy, crosshair_arm, crosshair_gap,
+                                                  crosshair_thickness, crosshair_outline, 0))
     {
         destroy_ring_bitmap();
         return false;
     }
-    if (painted_focus_alpha_ > 0 && !zmouse::render::paint_antialiased_ring(surface, ring_size_.cx, ring_size_.cy,
-                                                                            base_radius_px, ring_stroke_px_, 0))
+    if (painted_focus_alpha_ > 0 &&
+        !zmouse::render::paint_antialiased_outline(surface, ring_size_.cx, ring_size_.cy, spotlight_shape_,
+                                                   base_radius_px, ring_stroke_px_, 0))
     {
         destroy_ring_bitmap();
         return false;
     }
     if (painted_ripple_alpha_ > 0 && painted_ripple_radius_px_ > 0 &&
-        !zmouse::render::paint_antialiased_ring(surface, ring_size_.cx, ring_size_.cy, painted_ripple_radius_px_,
-                                                (std::max)(2, ring_stroke_px_ * 2 / 3), 0))
+        !zmouse::render::paint_antialiased_outline(surface, ring_size_.cx, ring_size_.cy, spotlight_shape_,
+                                                   painted_ripple_radius_px_, (std::max)(2, ring_stroke_px_ * 2 / 3),
+                                                   0))
     {
         destroy_ring_bitmap();
         return false;
     }
 
-    if (ripple_alpha > 0 && !zmouse::render::paint_antialiased_ring(surface, requested_size.cx, requested_size.cy,
-                                                                    ripple_radius, ripple_stroke, ripple_alpha))
+    if (ripple_alpha > 0 &&
+        !zmouse::render::paint_antialiased_outline(surface, requested_size.cx, requested_size.cy, spotlight_shape_,
+                                                   ripple_radius, ripple_stroke, ripple_alpha))
     {
         destroy_ring_bitmap();
         return false;
     }
-    if (focus_alpha > 0 && !zmouse::render::paint_antialiased_ring(surface, requested_size.cx, requested_size.cy,
-                                                                   base_radius_px, stroke, focus_alpha))
+    if (focus_alpha > 0 &&
+        !zmouse::render::paint_antialiased_outline(surface, requested_size.cx, requested_size.cy, spotlight_shape_,
+                                                   base_radius_px, stroke, focus_alpha))
     {
         destroy_ring_bitmap();
         return false;
     }
-    if (crosshair_alpha > 0 &&
-        !zmouse::render::paint_crosshair(surface, requested_size.cx, requested_size.cy, crosshair_arm, crosshair_gap,
-                                         crosshair_thickness, crosshair_alpha))
+    if (crosshair_alpha > 0 && !zmouse::render::paint_contrast_crosshair(
+                                   surface, requested_size.cx, requested_size.cy, crosshair_arm, crosshair_gap,
+                                   crosshair_thickness, crosshair_outline, crosshair_alpha))
     {
         destroy_ring_bitmap();
         return false;
@@ -562,8 +575,8 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) const noe
 bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)
 {
     CURSORINFO cursor_info{.cbSize = sizeof(CURSORINFO)};
-    if (GetCursorInfo(&cursor_info) == FALSE || (cursor_info.flags & CURSOR_SHOWING) == 0 ||
-        cursor_info.hCursor == nullptr)
+    if (GetCursorInfo(&cursor_info) == FALSE || cursor_info.hCursor == nullptr ||
+        ((cursor_info.flags & CURSOR_SHOWING) == 0 && !system_cursor_hidden_))
     {
         cursor_drawable_ = false;
         return true;
@@ -671,6 +684,28 @@ bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)
     return true;
 }
 
+bool OverlayManager::hide_system_cursor()
+{
+    if (system_cursor_hidden_)
+    {
+        return true;
+    }
+    if (!magnification_initialized_)
+    {
+        if (MagInitialize() == FALSE)
+        {
+            return false;
+        }
+        magnification_initialized_ = true;
+    }
+    if (MagShowSystemCursor(FALSE) == FALSE)
+    {
+        return false;
+    }
+    system_cursor_hidden_ = true;
+    return true;
+}
+
 bool OverlayManager::update_cursor_position(const overlay::Point cursor)
 {
     if (cursor_window_ == nullptr)
@@ -680,6 +715,7 @@ bool OverlayManager::update_cursor_position(const overlay::Point cursor)
     if (!effects_.enlarged_cursor_enabled)
     {
         ShowWindow(cursor_window_, SW_HIDE);
+        restore_system_cursor();
         return true;
     }
     if (!ensure_cursor_bitmap(dpi_at(cursor)))
@@ -687,6 +723,13 @@ bool OverlayManager::update_cursor_position(const overlay::Point cursor)
         return false;
     }
     if (!cursor_drawable_)
+    {
+        ShowWindow(cursor_window_, SW_HIDE);
+        restore_system_cursor();
+        return true;
+    }
+
+    if (!hide_system_cursor())
     {
         ShowWindow(cursor_window_, SW_HIDE);
         return true;
@@ -704,10 +747,18 @@ bool OverlayManager::update_cursor_position(const overlay::Point cursor)
     if (UpdateLayeredWindow(cursor_window_, nullptr, &destination, &size, cursor_dc_, &source, 0, &blend, ULW_ALPHA) ==
         FALSE)
     {
+        ShowWindow(cursor_window_, SW_HIDE);
+        restore_system_cursor();
         return false;
     }
-    return SetWindowPos(cursor_window_, HWND_TOPMOST, 0, 0, 0, 0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+    if (SetWindowPos(cursor_window_, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE)
+    {
+        ShowWindow(cursor_window_, SW_HIDE);
+        restore_system_cursor();
+        return false;
+    }
+    return true;
 }
 
 UINT OverlayManager::dpi_at(const overlay::Point cursor) const noexcept
@@ -735,6 +786,7 @@ void OverlayManager::apply_dim_progress() const noexcept
 
 void OverlayManager::destroy_windows() noexcept
 {
+    restore_system_cursor();
     if (cursor_window_ != nullptr)
     {
         DestroyWindow(cursor_window_);
@@ -791,5 +843,23 @@ void OverlayManager::destroy_cursor_bitmap() noexcept
     rendered_cursor_dpi_ = 0;
     rendered_cursor_scale_percent_ = 0;
     cursor_drawable_ = false;
+}
+
+void OverlayManager::restore_system_cursor() noexcept
+{
+    if (system_cursor_hidden_ && MagShowSystemCursor(TRUE) != FALSE)
+    {
+        system_cursor_hidden_ = false;
+    }
+}
+
+void OverlayManager::uninitialize_magnification() noexcept
+{
+    restore_system_cursor();
+    if (magnification_initialized_)
+    {
+        static_cast<void>(MagUninitialize());
+        magnification_initialized_ = false;
+    }
 }
 } // namespace zmouse::platform

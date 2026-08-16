@@ -136,7 +136,8 @@ void legacy_rasterize(std::span<std::uint32_t> pixels, const std::int32_t size, 
                      static_cast<std::uint64_t>(animations) * frame_count, checksum);
 }
 
-[[nodiscard]] Result benchmark_persistent(const Scenario& scenario, const std::int32_t animations)
+[[nodiscard]] Result benchmark_persistent(const Scenario& scenario, const std::int32_t animations,
+                                          const zmouse::overlay::SpotlightShape shape)
 {
     const auto maximum_radius = radius_for_frame(scenario, 0);
     const auto capacity = (maximum_radius + scenario.margin) * 2;
@@ -163,11 +164,11 @@ void legacy_rasterize(std::span<std::uint32_t> pixels, const std::int32_t size, 
             const auto start = Clock::now();
             if (previous_radius > 0)
             {
-                static_cast<void>(zmouse::render::paint_antialiased_ring(surface, previous_size, previous_size,
-                                                                         previous_radius, scenario.stroke, 0));
+                static_cast<void>(zmouse::render::paint_antialiased_outline(
+                    surface, previous_size, previous_size, shape, previous_radius, scenario.stroke, 0));
             }
             static_cast<void>(
-                zmouse::render::paint_antialiased_ring(surface, size, size, radius, scenario.stroke, 235));
+                zmouse::render::paint_antialiased_outline(surface, size, size, shape, radius, scenario.stroke, 235));
             const auto end = Clock::now();
             frame_times_us.push_back(std::chrono::duration<double, std::micro>(end - start).count());
             checksum = checksum * 1'099'511'628'211ULL ^
@@ -217,7 +218,12 @@ int main(const int argument_count, char** arguments)
     for (const auto& scenario : scenarios)
     {
         print_result(scenario, "legacy-full-raster", animations, benchmark_legacy(scenario, animations));
-        print_result(scenario, "persistent-circumference", animations, benchmark_persistent(scenario, animations));
+        print_result(scenario, "persistent-circle", animations,
+                     benchmark_persistent(scenario, animations, zmouse::overlay::SpotlightShape::circle));
+        print_result(scenario, "persistent-rounded-square", animations,
+                     benchmark_persistent(scenario, animations, zmouse::overlay::SpotlightShape::rounded_square));
+        print_result(scenario, "persistent-diamond", animations,
+                     benchmark_persistent(scenario, animations, zmouse::overlay::SpotlightShape::diamond));
     }
     return 0;
 }

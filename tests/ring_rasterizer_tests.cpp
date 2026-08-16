@@ -107,6 +107,53 @@ void test_crosshair_has_a_clear_center_and_four_arms()
           "erasing the crosshair restores transparency");
 }
 
+void test_contrast_crosshair_combines_dark_outline_and_white_core()
+{
+    constexpr std::int32_t size = 32;
+    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(size * size));
+    const zmouse::render::PixelSurface surface{.pixels = pixels, .width = size, .height = size, .stride = size};
+    check(zmouse::render::paint_contrast_crosshair(surface, size, size, 6, 3, 2, 1, 220),
+          "contrast crosshair is drawn");
+    const auto at = [&](const std::int32_t x, const std::int32_t y)
+    { return pixels[static_cast<std::size_t>(y * size + x)]; };
+    check(at(8, 16) == 0xDCDCDCDCU, "contrast crosshair keeps a white premultiplied core");
+    check(at(8, 14) == 0xDC000000U, "contrast crosshair adds a dark premultiplied outline");
+    check(at(16, 16) == 0U, "contrast crosshair keeps the cursor center clear");
+    check(zmouse::render::paint_contrast_crosshair(surface, size, size, 6, 3, 2, 1, 0),
+          "contrast crosshair can be erased");
+    check(std::ranges::all_of(pixels, [](const std::uint32_t pixel) { return pixel == 0U; }),
+          "erasing the contrast crosshair restores transparency");
+}
+
+void test_outline_matches_each_spotlight_shape()
+{
+    constexpr std::int32_t size = 80;
+    constexpr std::int32_t center = size / 2;
+    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(size * size));
+    const zmouse::render::PixelSurface surface{.pixels = pixels, .width = size, .height = size, .stride = size};
+    const auto at = [&](const std::int32_t x, const std::int32_t y)
+    { return pixels[static_cast<std::size_t>(y * size + x)]; };
+
+    check(zmouse::render::paint_antialiased_outline(surface, size, size, zmouse::overlay::SpotlightShape::circle, 20, 4,
+                                                    235),
+          "circle outline is drawn");
+    check(at(54, 26) != 0U && at(52, 20) == 0U && at(50, 30) == 0U, "circle outline has a distinct circular profile");
+
+    std::ranges::fill(pixels, 0U);
+    check(zmouse::render::paint_antialiased_outline(surface, size, size,
+                                                    zmouse::overlay::SpotlightShape::rounded_square, 20, 4, 235),
+          "rounded-square outline is drawn");
+    check(at(54, 26) == 0U && at(52, 20) != 0U && at(50, 30) == 0U,
+          "rounded-square outline has a distinct rounded profile");
+
+    std::ranges::fill(pixels, 0U);
+    check(zmouse::render::paint_antialiased_outline(surface, size, size, zmouse::overlay::SpotlightShape::diamond, 20,
+                                                    4, 235),
+          "diamond outline is drawn");
+    check(at(54, 26) == 0U && at(52, 20) == 0U && at(50, 30) != 0U, "diamond outline has a distinct diagonal profile");
+    check(at(center, center) == 0U, "all shape outlines keep their center transparent");
+}
+
 void test_optimized_raster_matches_the_legacy_pixels()
 {
     for (const auto [size, radius, stroke] : {std::tuple{64, 20, 4}, std::tuple{96, 35, 5}, std::tuple{128, 51, 7}})
@@ -130,6 +177,8 @@ int main()
     test_ring_is_drawn_and_erased_without_touching_capacity_padding();
     test_invalid_surfaces_are_rejected();
     test_crosshair_has_a_clear_center_and_four_arms();
+    test_contrast_crosshair_combines_dark_outline_and_white_core();
+    test_outline_matches_each_spotlight_shape();
     test_optimized_raster_matches_the_legacy_pixels();
 
     if (failures == 0)

@@ -66,6 +66,7 @@ target_link_libraries(ZMouseShow
         comctl32
         dwmapi
         gdi32
+        magnification
         shell32
         shcore
         user32
