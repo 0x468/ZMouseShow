@@ -44,7 +44,8 @@ constexpr UINT command_settings = 1008;
 constexpr UINT message_tray = WM_APP + 1;
 constexpr UINT message_activate = WM_APP + 2;
 constexpr UINT_PTR overlay_timer_id = 1;
-constexpr UINT animation_timer_interval_ms = 16;
+constexpr DWORD high_resolution_waitable_timer_flag = 0x00000002;
+constexpr UINT animation_timer_interval_ms = 8;
 constexpr UINT timeout_timer_interval_ms = 50;
 
 constexpr std::uint8_t mouse_left = 1U << 0U;
@@ -205,6 +206,15 @@ class Application final
     {
     }
 
+    ~Application()
+    {
+        stop_animation_timer();
+        if (animation_timer_ != nullptr)
+        {
+            static_cast<void>(CloseHandle(animation_timer_));
+        }
+    }
+
     int run()
     {
         if (const auto loaded = zmouse::config::load_toml(config_path_))
@@ -231,21 +241,38 @@ class Application final
             show_settings();
         }
 
-        MSG message{};
+        initialize_animation_timer();
+        const DWORD wait_handle_count = animation_timer_ != nullptr ? 1U : 0U;
+        const HANDLE* wait_handles = animation_timer_ != nullptr ? &animation_timer_ : nullptr;
         while (true)
         {
-            const BOOL result = GetMessageW(&message, nullptr, 0, 0);
-            if (result == 0)
+            const DWORD wait_result = MsgWaitForMultipleObjectsEx(wait_handle_count, wait_handles, INFINITE,
+                                                                  QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            if (wait_result == WAIT_FAILED)
             {
-                return static_cast<int>(message.wParam);
+                return 1;
             }
-            if (result == -1)
+            if (animation_timer_ != nullptr && wait_result == WAIT_OBJECT_0)
+            {
+                on_overlay_timer();
+                continue;
+            }
+
+            if (wait_result != WAIT_OBJECT_0 + wait_handle_count)
             {
                 return 1;
             }
 
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+            MSG message{};
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != FALSE)
+            {
+                if (message.message == WM_QUIT)
+                {
+                    return static_cast<int>(message.wParam);
+                }
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
         }
     }
 
@@ -630,6 +657,7 @@ class Application final
     {
         overlay_manager_.hide();
         locator_animation_.reset();
+        stop_animation_timer();
         static_cast<void>(KillTimer(window_, overlay_timer_id));
         suppressed_key_releases_.reset();
         pending_trigger_key_releases_.reset();
@@ -637,10 +665,52 @@ class Application final
         shake_detector_.reset();
     }
 
-    void schedule_overlay_timer() const noexcept
+    void initialize_animation_timer() noexcept
+    {
+        animation_timer_ = CreateWaitableTimerExW(nullptr, nullptr, high_resolution_waitable_timer_flag,
+                                                  TIMER_MODIFY_STATE | SYNCHRONIZE);
+        if (animation_timer_ == nullptr)
+        {
+            animation_timer_ = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+        }
+    }
+
+    [[nodiscard]] bool start_animation_timer() noexcept
+    {
+        if (animation_timer_ == nullptr)
+        {
+            return false;
+        }
+        if (animation_timer_running_)
+        {
+            return true;
+        }
+
+        LARGE_INTEGER due_time{};
+        due_time.QuadPart = -static_cast<LONGLONG>(animation_timer_interval_ms) * 10'000LL;
+        if (SetWaitableTimer(animation_timer_, &due_time, static_cast<LONG>(animation_timer_interval_ms), nullptr,
+                             nullptr, FALSE) == FALSE)
+        {
+            return false;
+        }
+        animation_timer_running_ = true;
+        return true;
+    }
+
+    void stop_animation_timer() noexcept
+    {
+        if (animation_timer_ != nullptr && animation_timer_running_)
+        {
+            static_cast<void>(CancelWaitableTimer(animation_timer_));
+        }
+        animation_timer_running_ = false;
+    }
+
+    void schedule_overlay_timer() noexcept
     {
         if (!overlay_manager_.visible())
         {
+            stop_animation_timer();
             static_cast<void>(KillTimer(window_, overlay_timer_id));
             return;
         }
@@ -648,14 +718,24 @@ class Application final
         const auto phase = locator_animation_.phase();
         const bool animating = phase == zmouse::overlay::AnimationPhase::appearing ||
                                phase == zmouse::overlay::AnimationPhase::disappearing;
-        if (!animating && !auto_timeout_enabled_)
+        if (animating)
+        {
+            static_cast<void>(KillTimer(window_, overlay_timer_id));
+            if (!start_animation_timer())
+            {
+                static_cast<void>(SetTimer(window_, overlay_timer_id, animation_timer_interval_ms, nullptr));
+            }
+            return;
+        }
+
+        stop_animation_timer();
+        if (!auto_timeout_enabled_)
         {
             static_cast<void>(KillTimer(window_, overlay_timer_id));
             return;
         }
 
-        const UINT interval = animating ? animation_timer_interval_ms : timeout_timer_interval_ms;
-        static_cast<void>(SetTimer(window_, overlay_timer_id, interval, nullptr));
+        static_cast<void>(SetTimer(window_, overlay_timer_id, timeout_timer_interval_ms, nullptr));
     }
 
     void update_overlay_cursor() noexcept
@@ -1026,6 +1106,8 @@ class Application final
     std::bitset<512> suppressed_key_releases_{};
     std::bitset<512> pending_trigger_key_releases_{};
     bool activation_pending_{};
+    HANDLE animation_timer_{};
+    bool animation_timer_running_{};
     std::uint8_t mouse_buttons_{};
     ULONGLONG overlay_idle_timeout_ms_{1'200};
     ULONGLONG overlay_max_duration_ms_{5'000};

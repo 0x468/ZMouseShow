@@ -292,22 +292,22 @@ void test_locator_animation_transitions()
     animation.show(1'000);
     const auto first = animation.frame(1'000);
     check(first.surface_visible && first.needs_more_frames, "show starts an active transition");
-    check(first.dim_progress == 0.0 && first.ring_scale == 4.0, "show starts transparent with a large ring");
+    check(first.dim_progress == 0.0 && first.ring_scale == 2.25, "show starts transparent with a focused ring");
 
-    const auto middle = animation.frame(1'110);
+    const auto middle = animation.frame(1'090);
     check(middle.dim_progress > 0.0 && middle.dim_progress < 1.0, "fade-in progresses over time");
-    check(middle.ring_scale > 1.0 && middle.ring_scale < 4.0, "the pulse ring contracts over time");
+    check(middle.ring_scale > 1.0 && middle.ring_scale < 2.25, "the pulse ring contracts over time");
 
-    const auto shown = animation.frame(1'220);
+    const auto shown = animation.frame(1'180);
     check(shown.surface_visible && !shown.needs_more_frames, "fade-in reaches a stable visible state");
     check(shown.dim_progress == 1.0 && shown.ring_scale == 1.0, "stable frame reaches final opacity and scale");
 
     animation.hide(2'000);
-    const auto fading = animation.frame(2'110);
+    const auto fading = animation.frame(2'090);
     check(fading.surface_visible && fading.needs_more_frames, "hide starts a fade-out transition");
     check(fading.dim_progress > 0.0 && fading.dim_progress < 1.0, "fade-out reduces dim opacity");
 
-    const auto hidden = animation.frame(2'220);
+    const auto hidden = animation.frame(2'180);
     check(!hidden.surface_visible && !hidden.needs_more_frames, "fade-out finishes hidden");
     check(animation.phase() == zmouse::overlay::AnimationPhase::hidden, "finished fade-out resets the state");
 }

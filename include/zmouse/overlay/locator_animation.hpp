@@ -34,8 +34,8 @@ class LocatorAnimation final
     [[nodiscard]] AnimationPhase phase() const noexcept;
 
   private:
-    static constexpr AnimationTimestampMs transition_duration_ms = 220;
-    static constexpr double initial_ring_scale = 4.0;
+    static constexpr AnimationTimestampMs transition_duration_ms = 180;
+    static constexpr double initial_ring_scale = 2.25;
 
     [[nodiscard]] static double progress(AnimationTimestampMs now, AnimationTimestampMs started_at) noexcept;
     [[nodiscard]] static double ease_out(double value) noexcept;

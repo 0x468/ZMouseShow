@@ -16,8 +16,9 @@ namespace
 {
 using Clock = std::chrono::steady_clock;
 
-constexpr std::int32_t frame_count = 14;
+constexpr std::int32_t frame_count = 24;
 constexpr std::int32_t maximum_animated_radius = 768;
+constexpr double initial_ring_scale = 2.25;
 
 struct Scenario
 {
@@ -45,7 +46,7 @@ struct Result
 [[nodiscard]] std::int32_t radius_for_frame(const Scenario& scenario, const std::int32_t frame) noexcept
 {
     const double linear = static_cast<double>(frame) / static_cast<double>(frame_count - 1);
-    const double scale = 1.0 + 3.0 * (1.0 - ease_out(linear));
+    const double scale = 1.0 + (initial_ring_scale - 1.0) * (1.0 - ease_out(linear));
     const auto requested = static_cast<std::int32_t>(std::lround(static_cast<double>(scenario.base_radius) * scale));
     return (std::clamp)(requested, scenario.base_radius, (std::max)(scenario.base_radius, maximum_animated_radius));
 }
