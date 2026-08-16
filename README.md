@@ -1,57 +1,53 @@
 # ZMouseShow
 
-ZMouseShow is a portable Windows mouse locator for multi-monitor and high-DPI desktops. P1 is complete and the project is now in its P2 experience-enhancement phase.
+ZMouseShow 是一个面向 Windows 多显示器和高 DPI 桌面的绿色鼠标定位工具。程序无需安装、不修改系统鼠标方案，默认通过快速双击左 Ctrl 显示定位效果，也可启用自定义全局组合键或鼠标晃动触发。
 
-## Requirements
+当前 P2 功能已经实现，正在完成最终验收；正式通过前不会创建 `p2` 标签。
 
-- Visual Studio 2026 with the Desktop development with C++ workload
-- MSVC v145
-- CMake 4.4 or newer
-- Windows 10 Build 19041 or newer
+## 环境要求
 
-Visual Studio 2022 and 2019 generators are intentionally not supported.
+- Windows 10 Build 19041 或更高版本；
+- Visual Studio 2026，安装“使用 C++ 的桌面开发”工作负载；
+- MSVC v145；
+- CMake 4.4 或更高版本。
 
-## Configure, build, and test
+项目有意不支持 Visual Studio 2022/2019 生成器。发布版使用静态 MSVC 运行库，目标电脑不需要另装 VC 运行库或第三方 DLL。
+
+## 构建与测试
 
 ```powershell
 cmake --preset vs2026-x64
 cmake --build --preset debug
-ctest --preset debug
+ctest --preset debug --output-on-failure
+cmake --build --preset release
+ctest --preset release --output-on-failure
 ```
 
-Release builds use the static MSVC runtime and produce a native Windows executable:
+生成内容位于 `out/build/vs2026-x64/`，不提交到 Git；CMake 是唯一工程源。
+
+## 快速使用
+
+直接运行 `ZMouseShow.exe`。默认设置下，按下并释放左 Ctrl 两次即可显示定位效果；两次之间不能夹杂其它按键或鼠标按键。再次输入、点击、滚轮、暂停或退出会关闭效果；自动超时默认关闭。
+
+右键托盘图标可以打开设置、暂停、重新加载 TOML、导出默认配置、导出诊断或退出。设置窗口支持触发方式、高亮形状、视觉效果、全屏抑制、程序排除和当前用户登录自启动。
+
+程序不要求配置文件。存在 `ZMouseShow.toml` 时默认从 EXE 同目录读取，也可用 `--config <路径>` 指定。设置保存采用同目录临时文件和原子替换，保留原有注释、未知字段和未知表；旧版配置缺少的新字段使用默认值，并在首次保存时自动补全。
+
+开发机只有一块显示器时，可运行：
 
 ```powershell
-cmake --build --preset release
+ZMouseShow.exe --simulate-displays
 ```
 
-Generated Visual Studio solutions and projects live under `out/` and are not committed. CMake is the only project source of truth.
+该模式模拟三块具有负坐标、垂直偏移和不同 DPI 的显示器，可按 `1`、`2`、`3` 切换圆形、圆角方形和菱形。它不会进入正常常驻流程，也不替代真实多屏与 DWM 验收。
 
-## Configuration
+## 文档
 
-No configuration file is required. When present, `ZMouseShow.toml` is loaded from the executable directory; an alternate path can be selected with `--config <path>`. Empty and missing files use embedded defaults. Unknown, mistyped, and out-of-range fields are ignored, while a syntactically invalid TOML document is rejected as a whole.
+- [使用说明](docs/使用说明.md)
+- [完整功能说明](docs/功能说明.md)
+- [需求规格说明书](docs/需求规格说明书.md)
+- [P2 实施计划](docs/P2实施计划.md)
+- [渲染性能对比报告](docs/性能对比报告.md)
+- [P1 验收清单](docs/P1验收清单.md)
 
-Open the native settings dialog from the tray menu or with `ZMouseShow.exe --settings`. The initial panel covers shake enablement, Ctrl side, custom-hotkey enablement, automatic timeout, spotlight shape/radius, and dim opacity. Applying changes updates the running process and writes them back atomically; existing comments and unknown fields are retained. Advanced timing, hotkey contents, and shake thresholds remain available in TOML. The tray menu can also reload the active configuration or export a documented default TOML file; export never overwrites an existing file. Pause remains a session-only state.
-
-On a single-monitor development machine, launch the built executable with `--simulate-displays` to open an interactive three-monitor preview. It models negative coordinates, vertical offsets, 100%/125%/150% DPI, and a cross-monitor spotlight; press 1/2/3 to switch between circle, rounded-square, and diamond shapes. This is a visual development aid, not a substitute for real DWM multi-monitor validation.
-
-## Current state
-
-- Accepted requirements and architecture decision record
-- VS 2026 / CMake 4.4 / C++23 project baseline
-- Strict double-Ctrl trigger through Raw Input, configurable for left, right, or either side
-- Optional exact custom hotkey (`Ctrl+Alt+F11` by default, disabled until enabled in TOML)
-- Optional experimental mouse-shake trigger, disabled by default and available from the tray menu
-- Per-monitor Region overlays with DPI-aware circle, rounded-square, or diamond spotlights and a cursor ring
-- 220 ms fade transitions and a contracting pulse ring driven by a tested animation state machine
-- Spotlight tracking, input dismissal, optional auto-timeout, and display-change rebuild
-- Embedded defaults plus optional portable TOML loading, reloading, atomic preference persistence, and safe default export
-- Privacy-bounded diagnostics export with effective settings and multi-monitor/DPI topology
-- Interactive single-screen preview for a mixed-DPI three-monitor topology
-- Native Win32 settings dialog with immediate apply, validation, and comment-preserving TOML persistence
-
-Run `ZMouseShow.exe`, then press and release the configured Ctrl key twice in quick succession without pressing any other key or mouse button. The default remains left Ctrl. The spotlight remains visible by default until another key, click, wheel input, pause, or exit. Right-click the tray icon to open settings, pause, toggle common preferences, or exit. Configure advanced fields in `ZMouseShow.toml`, then reload them from the tray.
-
-See [the Chinese requirements](docs/需求规格说明书.md) for the full scope and [the P1 acceptance checklist](docs/P1验收清单.md) for hardware and interaction validation.
-
-The TOML parser is the vendored single-header distribution of [toml++](https://github.com/marzer/tomlplusplus), so builds remain offline and the executable has no parser DLL dependency.
+TOML 解析器使用仓库内置的 [toml++](https://github.com/marzer/tomlplusplus) 单头文件版本，因此离线构建且没有解析器 DLL 依赖。
