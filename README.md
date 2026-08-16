@@ -51,6 +51,9 @@ ZMouseShow.exe --simulate-displays
 - [P3 实施计划](docs/P3实施计划.md)
 - [P3 验收清单](docs/P3验收清单.md)
 - [P3 候选验证记录](docs/P3候选验证记录.md)
+- [P4 实施计划](docs/P4实施计划.md)
+- [P4 验收清单](docs/P4验收清单.md)
+- [ADR 0002：局部放大镜捕获与 GPU 合成](docs/adr/0002-local-magnifier-rendering.md)
 - [渲染性能对比报告](docs/性能对比报告.md)
 - [P1 验收清单](docs/P1验收清单.md)
 
