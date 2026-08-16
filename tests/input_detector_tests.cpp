@@ -34,6 +34,17 @@ void test_clean_double_ctrl_triggers()
           "trigger Ctrl release does not retrigger");
 }
 
+void test_disabled_double_ctrl_never_starts_a_candidate()
+{
+    zmouse::input::DoubleCtrlDetector detector({.enabled = false});
+    check(!detector.process({zmouse::input::KeyKind::left_control, true, false, 1'000}, false, false),
+          "disabled double Ctrl ignores the first press");
+    check(!detector.process({zmouse::input::KeyKind::left_control, false, false, 1'050}, false, false),
+          "disabled double Ctrl ignores the first release");
+    check(!detector.process({zmouse::input::KeyKind::left_control, true, false, 1'200}, false, false),
+          "disabled double Ctrl ignores the second press");
+}
+
 void test_ctrl_chords_cancel_candidate()
 {
     zmouse::input::DoubleCtrlDetector detector;
@@ -117,6 +128,29 @@ void test_custom_hotkey_requires_an_exact_clean_chord()
     auto other_key = valid;
     other_key.other_key_down = true;
     check(!detector.process(other_key), "an unrelated held key blocks the hotkey");
+}
+
+void test_hotkey_safety_validation()
+{
+    const auto default_hotkey = zmouse::input::validate_hotkey_config(
+        {.enabled = true, .key = 0x7BU, .control = true, .alt = true, .shift = false, .windows = false});
+    check(default_hotkey.accepted && !default_hotkey.requires_confirmation,
+          "default Ctrl+Alt+F12 hotkey is accepted without a warning");
+
+    const auto weak_letter = zmouse::input::validate_hotkey_config(
+        {.enabled = true, .key = 'S', .control = true, .alt = false, .shift = false, .windows = false});
+    check(!weak_letter.accepted && weak_letter.issue == zmouse::input::HotkeyIssue::insufficient_modifiers,
+          "a single-modifier letter shortcut is rejected");
+
+    const auto common_chord = zmouse::input::validate_hotkey_config(
+        {.enabled = true, .key = 'S', .control = true, .alt = false, .shift = true, .windows = false});
+    check(common_chord.accepted && common_chord.requires_confirmation,
+          "a common application shortcut requires confirmation");
+
+    const auto reserved_chord = zmouse::input::validate_hotkey_config(
+        {.enabled = true, .key = 'L', .control = true, .alt = false, .shift = false, .windows = true});
+    check(!reserved_chord.accepted && reserved_chord.issue == zmouse::input::HotkeyIssue::reserved_system_shortcut,
+          "a reserved Windows shortcut is rejected");
 }
 
 zmouse::input::ShakeDetector make_test_shake_detector()
@@ -310,11 +344,13 @@ void test_overlay_geometry_handles_negative_monitor_coordinates()
 int main()
 {
     test_clean_double_ctrl_triggers();
+    test_disabled_double_ctrl_never_starts_a_candidate();
     test_ctrl_chords_cancel_candidate();
     test_other_held_key_and_mouse_button_block_ctrl();
     test_repeat_and_timing_do_not_trigger();
     test_right_ctrl_and_either_side_configuration();
     test_custom_hotkey_requires_an_exact_clean_chord();
+    test_hotkey_safety_validation();
     test_single_direction_is_not_a_shake();
     test_reversals_trigger_shake();
     test_default_shake_is_stable_across_polling_rates();

@@ -173,6 +173,29 @@ void test_invalid_syntax_is_rejected()
     check(!zmouse::config::parse_toml("[general\nshake_enabled = true"), "syntactically invalid TOML is rejected");
 }
 
+void test_invalid_enabled_hotkey_is_disabled_as_a_group()
+{
+    const auto invalid_key = zmouse::config::parse_toml(R"toml(
+[hotkey]
+enabled = true
+key = "Escape"
+control = true
+alt = true
+)toml");
+    check(invalid_key && !invalid_key->hotkey.enabled,
+          "an enabled hotkey with an unsupported key is disabled instead of falling back to F12");
+
+    const auto invalid_modifier = zmouse::config::parse_toml(R"toml(
+[hotkey]
+enabled = true
+key = "F12"
+control = "yes"
+alt = true
+)toml");
+    check(invalid_modifier && !invalid_modifier->hotkey.enabled,
+          "an enabled hotkey with a mistyped modifier is disabled as a group");
+}
+
 void test_exported_defaults_round_trip()
 {
     const auto settings = zmouse::config::parse_toml(zmouse::config::default_toml_text());
@@ -272,8 +295,11 @@ answer = 42
     settings.auto_timeout_enabled = true;
     settings.spotlight_radius_dip = 180;
     settings.dim_opacity_percent = 72;
+    settings.double_ctrl.enabled = false;
     settings.double_ctrl.side = zmouse::input::ControlSide::right;
     settings.hotkey.enabled = true;
+    settings.hotkey.key = 'K';
+    settings.hotkey.shift = true;
     check(zmouse::config::persist_basic_settings(path, settings), "basic dialog settings can be persisted");
 
     const auto contents = read_all(path);
@@ -285,7 +311,8 @@ answer = 42
     check(loaded && loaded->shake_enabled && loaded->auto_timeout_enabled, "persisted general settings load back");
     check(loaded && loaded->spotlight_radius_dip == 180 && loaded->dim_opacity_percent == 72,
           "persisted overlay settings load back");
-    check(loaded && loaded->double_ctrl.side == zmouse::input::ControlSide::right && loaded->hotkey.enabled,
+    check(loaded && !loaded->double_ctrl.enabled && loaded->double_ctrl.side == zmouse::input::ControlSide::right &&
+              loaded->hotkey.enabled && loaded->hotkey.key == 'K' && loaded->hotkey.shift,
           "persisted trigger settings load back");
     remove_test_file(path);
 }
@@ -325,6 +352,7 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
                       .dpi_y = 120,
                       .primary = false}},
     };
+    snapshot.settings.double_ctrl.enabled = false;
     snapshot.settings.double_ctrl.side = zmouse::input::ControlSide::right;
     snapshot.settings.hotkey.enabled = true;
 
@@ -333,6 +361,8 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
     check(report.find("virtual_desktop: -2560,0 - 2560,1440 (5120x1440)") != std::string::npos,
           "diagnostics include negative-coordinate desktop geometry");
     check(report.find("monitor[0].dpi: 120x120") != std::string::npos, "diagnostics include per-monitor DPI");
+    check(report.find("double_ctrl.enabled: false") != std::string::npos,
+          "diagnostics include whether double Ctrl is enabled");
     check(report.find("double_ctrl.side: right") != std::string::npos,
           "diagnostics include effective keyboard settings");
     check(report.find("does not contain key history") != std::string::npos,
@@ -351,6 +381,7 @@ int main()
     test_valid_values_override_defaults();
     test_invalid_values_are_ignored();
     test_invalid_syntax_is_rejected();
+    test_invalid_enabled_hotkey_is_disabled_as_a_group();
     test_exported_defaults_round_trip();
     test_file_export_load_and_no_overwrite();
     test_preferences_are_persisted_without_losing_comments();

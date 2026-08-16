@@ -14,6 +14,25 @@ struct HotkeyConfig
     bool windows{};
 };
 
+enum class HotkeyIssue : std::uint8_t
+{
+    none,
+    disabled,
+    unsupported_key,
+    insufficient_modifiers,
+    reserved_system_shortcut,
+    common_application_shortcut,
+};
+
+struct HotkeyValidation
+{
+    bool accepted{};
+    bool requires_confirmation{};
+    HotkeyIssue issue{HotkeyIssue::none};
+};
+
+[[nodiscard]] HotkeyValidation validate_hotkey_config(const HotkeyConfig& config) noexcept;
+
 struct HotkeyEvent
 {
     std::uint16_t key{};

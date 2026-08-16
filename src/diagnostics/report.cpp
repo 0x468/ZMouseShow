@@ -85,6 +85,7 @@ std::string build_report(const Snapshot& snapshot)
            << "overlay.dim_opacity_percent: " << settings.dim_opacity_percent << '\n'
            << "timeout.idle_ms: " << settings.idle_timeout_ms << '\n'
            << "timeout.maximum_duration_ms: " << settings.maximum_duration_ms << '\n'
+           << "double_ctrl.enabled: " << boolean(settings.double_ctrl.enabled) << '\n'
            << "double_ctrl.side: " << control_side(settings.double_ctrl.side) << '\n'
            << "double_ctrl.minimum_interval_ms: " << settings.double_ctrl.minimum_interval_ms << '\n'
            << "double_ctrl.maximum_interval_ms: " << settings.double_ctrl.maximum_interval_ms << '\n'

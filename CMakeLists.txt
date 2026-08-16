@@ -56,6 +56,7 @@ add_executable(ZMouseShow WIN32
 target_link_libraries(ZMouseShow
     PRIVATE
         ZMouseShow::Core
+        comctl32
         gdi32
         shell32
         shcore

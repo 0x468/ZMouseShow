@@ -14,6 +14,12 @@ void DoubleCtrlDetector::configure(const DoubleCtrlConfig config) noexcept
 
 bool DoubleCtrlDetector::process(const KeyEvent& event, const bool any_other_key_down, const bool any_mouse_button_down)
 {
+    if (!config_.enabled)
+    {
+        cancel_candidate();
+        return false;
+    }
+
     if (!accepts(event.key))
     {
         cancel_candidate();

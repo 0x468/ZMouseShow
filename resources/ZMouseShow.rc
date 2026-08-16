@@ -3,7 +3,7 @@
 #include <winres.h>
 #include "resource.h"
 
-IDD_SETTINGS DIALOGEX 0, 0, 330, 242
+IDD_SETTINGS DIALOGEX 0, 0, 330, 282
 STYLE DS_SETFONT | DS_CENTER | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE
 EXSTYLE WS_EX_CONTROLPARENT
 CAPTION "ZMouseShow 设置"
@@ -11,26 +11,30 @@ FONT 9, "Segoe UI"
 BEGIN
     LTEXT           "修改后可立即应用；高级参数仍可在 TOML 中调整。", -1, 12, 10, 306, 12
 
-    GROUPBOX        "触发方式", -1, 8, 28, 314, 92
+    GROUPBOX        "触发方式", -1, 8, 28, 314, 132
     CONTROL         "启用鼠标晃动触发(&S)", IDC_SHAKE_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 42, 140, 14
-    LTEXT           "双击 Ctrl 侧(&C)：", -1, 18, 64, 82, 12
-    COMBOBOX        IDC_CTRL_SIDE, 103, 61, 88, 70, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "启用自定义组合键(&H)", IDC_HOTKEY_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 86, 140, 14
-    LTEXT           "", IDC_HOTKEY_SUMMARY, 36, 102, 272, 11
+    CONTROL         "启用双击 Ctrl(&C)", IDC_DOUBLE_CTRL_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 62, 140, 14
+    LTEXT           "Ctrl 侧(&L)：", -1, 36, 84, 64, 12
+    COMBOBOX        IDC_CTRL_SIDE, 103, 81, 88, 70, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "启用自定义组合键(&H)", IDC_HOTKEY_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 106, 140, 14
+    CONTROL         "", IDC_HOTKEY_CAPTURE, "msctls_hotkey32", WS_BORDER | WS_TABSTOP, 36, 124, 108, 14
+    CONTROL         "包含 Win(&W)", IDC_HOTKEY_WINDOWS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 152, 124, 76, 14
+    PUSHBUTTON      "恢复默认", IDC_HOTKEY_RESET, 250, 123, 58, 14, WS_TABSTOP
+    LTEXT           "", IDC_HOTKEY_SUMMARY, 36, 142, 272, 11
 
-    GROUPBOX        "定位效果", -1, 8, 126, 314, 76
-    CONTROL         "启用自动超时(&T)", IDC_AUTO_TIMEOUT_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 140, 130, 14
-    LTEXT           "圆孔半径(&R)：", -1, 18, 162, 72, 12
-    EDITTEXT        IDC_RADIUS_DIP, 92, 159, 48, 14, ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP
-    LTEXT           "DIP（32–512）", -1, 146, 162, 76, 12
-    LTEXT           "暗化强度(&D)：", -1, 18, 182, 72, 12
-    EDITTEXT        IDC_DIM_OPACITY, 92, 179, 48, 14, ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP
-    LTEXT           "%（10–90）", -1, 146, 182, 76, 12
+    GROUPBOX        "定位效果", -1, 8, 166, 314, 76
+    CONTROL         "启用自动超时(&T)", IDC_AUTO_TIMEOUT_ENABLED, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 180, 130, 14
+    LTEXT           "圆孔半径(&R)：", -1, 18, 202, 72, 12
+    EDITTEXT        IDC_RADIUS_DIP, 92, 199, 48, 14, ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP
+    LTEXT           "DIP（32–512）", -1, 146, 202, 76, 12
+    LTEXT           "暗化强度(&D)：", -1, 18, 222, 72, 12
+    EDITTEXT        IDC_DIM_OPACITY, 92, 219, 48, 14, ES_AUTOHSCROLL | ES_NUMBER | WS_TABSTOP
+    LTEXT           "%（10–90）", -1, 146, 222, 76, 12
 
-    LTEXT           "“应用”会立即更新当前效果并保存到便携 TOML。", -1, 12, 208, 206, 12
-    DEFPUSHBUTTON   "确定", IDOK, 162, 222, 48, 14, WS_TABSTOP
-    PUSHBUTTON      "取消", IDCANCEL, 214, 222, 48, 14, WS_TABSTOP
-    PUSHBUTTON      "应用(&A)", IDC_APPLY_SETTINGS, 266, 222, 52, 14, WS_DISABLED | WS_TABSTOP
+    LTEXT           "“应用”会立即更新当前效果并保存到便携 TOML。", -1, 12, 248, 206, 12
+    DEFPUSHBUTTON   "确定", IDOK, 162, 262, 48, 14, WS_TABSTOP
+    PUSHBUTTON      "取消", IDCANCEL, 214, 262, 48, 14, WS_TABSTOP
+    PUSHBUTTON      "应用(&A)", IDC_APPLY_SETTINGS, 266, 262, 52, 14, WS_DISABLED | WS_TABSTOP
 END
 
 VS_VERSION_INFO VERSIONINFO

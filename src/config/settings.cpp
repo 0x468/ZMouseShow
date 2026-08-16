@@ -31,6 +31,7 @@ idle_ms = 1200
 maximum_duration_ms = 5000
 
 [double_ctrl]
+enabled = true
 side = "left"
 minimum_interval_ms = 100
 maximum_interval_ms = 500
@@ -83,6 +84,23 @@ void assign_double(const toml::table& table, const std::string_view key, double&
     {
         destination = *value;
     }
+}
+
+[[nodiscard]] bool assign_optional_boolean(const toml::table& table, const std::string_view key,
+                                           bool& destination) noexcept
+{
+    const auto* node = table.get(key);
+    if (node == nullptr)
+    {
+        return true;
+    }
+    const auto value = node->value<bool>();
+    if (!value)
+    {
+        return false;
+    }
+    destination = *value;
+    return true;
 }
 
 [[nodiscard]] char ascii_upper(const char value) noexcept
@@ -153,6 +171,10 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
     const auto default_double_ctrl = input::DoubleCtrlConfig{};
     if (const auto* double_ctrl = document["double_ctrl"].as_table())
     {
+        if (const auto enabled = (*double_ctrl)["enabled"].value<bool>())
+        {
+            settings.double_ctrl.enabled = *enabled;
+        }
         if (const auto side = (*double_ctrl)["side"].value<std::string>())
         {
             if (*side == "left")
@@ -180,33 +202,30 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
 
     if (const auto* hotkey = document["hotkey"].as_table())
     {
-        if (const auto enabled = (*hotkey)["enabled"].value<bool>())
+        input::HotkeyConfig candidate;
+        bool valid = assign_optional_boolean(*hotkey, "enabled", candidate.enabled) &&
+                     assign_optional_boolean(*hotkey, "control", candidate.control) &&
+                     assign_optional_boolean(*hotkey, "alt", candidate.alt) &&
+                     assign_optional_boolean(*hotkey, "shift", candidate.shift) &&
+                     assign_optional_boolean(*hotkey, "windows", candidate.windows);
+        if (const auto* key_node = hotkey->get("key"))
         {
-            settings.hotkey.enabled = *enabled;
-        }
-        if (const auto key = (*hotkey)["key"].value<std::string>())
-        {
-            if (const auto parsed_key = parse_hotkey_key(*key))
+            const auto key = key_node->value<std::string>();
+            const auto parsed_key = key ? parse_hotkey_key(*key) : std::nullopt;
+            if (parsed_key)
             {
-                settings.hotkey.key = *parsed_key;
+                candidate.key = *parsed_key;
+            }
+            else
+            {
+                valid = false;
             }
         }
-        if (const auto control = (*hotkey)["control"].value<bool>())
+        if (!valid || !input::validate_hotkey_config(candidate).accepted)
         {
-            settings.hotkey.control = *control;
+            candidate.enabled = false;
         }
-        if (const auto alt = (*hotkey)["alt"].value<bool>())
-        {
-            settings.hotkey.alt = *alt;
-        }
-        if (const auto shift = (*hotkey)["shift"].value<bool>())
-        {
-            settings.hotkey.shift = *shift;
-        }
-        if (const auto windows = (*hotkey)["windows"].value<bool>())
-        {
-            settings.hotkey.windows = *windows;
-        }
+        settings.hotkey = candidate;
     }
 
     if (const auto* shake = document["shake"].as_table())
@@ -674,11 +693,32 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
             side = "either";
         }
 
+        std::string hotkey_key;
+        if ((settings.hotkey.key >= 'A' && settings.hotkey.key <= 'Z') ||
+            (settings.hotkey.key >= '0' && settings.hotkey.key <= '9'))
+        {
+            hotkey_key.push_back(static_cast<char>(settings.hotkey.key));
+        }
+        else if (settings.hotkey.key >= 0x70U && settings.hotkey.key <= 0x87U)
+        {
+            hotkey_key = "F" + std::to_string(settings.hotkey.key - 0x70U + 1U);
+        }
+        else
+        {
+            return false;
+        }
+
         auto updated = patch_value(*existing, "general", "shake_enabled", settings.shake_enabled ? "true" : "false");
         updated =
             patch_value(updated, "general", "auto_timeout_enabled", settings.auto_timeout_enabled ? "true" : "false");
+        updated = patch_value(updated, "double_ctrl", "enabled", settings.double_ctrl.enabled ? "true" : "false");
         updated = patch_value(updated, "double_ctrl", "side", '"' + std::string(side) + '"');
         updated = patch_value(updated, "hotkey", "enabled", settings.hotkey.enabled ? "true" : "false");
+        updated = patch_value(updated, "hotkey", "key", '"' + hotkey_key + '"');
+        updated = patch_value(updated, "hotkey", "control", settings.hotkey.control ? "true" : "false");
+        updated = patch_value(updated, "hotkey", "alt", settings.hotkey.alt ? "true" : "false");
+        updated = patch_value(updated, "hotkey", "shift", settings.hotkey.shift ? "true" : "false");
+        updated = patch_value(updated, "hotkey", "windows", settings.hotkey.windows ? "true" : "false");
         updated = patch_value(updated, "overlay", "radius_dip", std::to_string(settings.spotlight_radius_dip));
         updated = patch_value(updated, "overlay", "dim_opacity_percent", std::to_string(settings.dim_opacity_percent));
         if (updated.size() > maximum_config_size)
@@ -689,8 +729,11 @@ bool persist_basic_settings(const std::filesystem::path& path, const Settings& s
         const auto verified = parse_toml(updated);
         if (!verified || verified->shake_enabled != settings.shake_enabled ||
             verified->auto_timeout_enabled != settings.auto_timeout_enabled ||
+            verified->double_ctrl.enabled != settings.double_ctrl.enabled ||
             verified->double_ctrl.side != settings.double_ctrl.side ||
-            verified->hotkey.enabled != settings.hotkey.enabled ||
+            verified->hotkey.enabled != settings.hotkey.enabled || verified->hotkey.key != settings.hotkey.key ||
+            verified->hotkey.control != settings.hotkey.control || verified->hotkey.alt != settings.hotkey.alt ||
+            verified->hotkey.shift != settings.hotkey.shift || verified->hotkey.windows != settings.hotkey.windows ||
             verified->spotlight_radius_dip != settings.spotlight_radius_dip ||
             verified->dim_opacity_percent != settings.dim_opacity_percent)
         {

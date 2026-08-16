@@ -30,6 +30,7 @@ struct KeyEvent
 
 struct DoubleCtrlConfig
 {
+    bool enabled{true};
     ControlSide side{ControlSide::left};
     TimestampMs minimum_interval_ms{100};
     TimestampMs maximum_interval_ms{500};
