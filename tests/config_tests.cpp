@@ -384,6 +384,8 @@ answer = 42
     check(contents.find("# keep the file comment") != std::string::npos, "basic persistence keeps file comments");
     check(contents.find("# keep radius comment") != std::string::npos, "basic persistence keeps inline comments");
     check(contents.find("[custom]\nanswer = 42") != std::string::npos, "basic persistence keeps unknown tables");
+    check(contents.find("[behavior]") != std::string::npos && contents.find("[startup]") != std::string::npos,
+          "saving a P1-style file adds the P2 sections");
 
     const auto loaded = zmouse::config::load_toml(path);
     check(loaded && loaded->shake_enabled && loaded->auto_timeout_enabled, "persisted general settings load back");
@@ -419,6 +421,22 @@ void test_basic_settings_create_a_missing_configuration()
     const auto loaded = zmouse::config::load_toml(path);
     check(loaded && loaded->shake_enabled && loaded->spotlight_radius_dip == 160,
           "newly created basic settings load back");
+    remove_test_file(path);
+}
+
+void test_failed_basic_persistence_preserves_the_existing_file()
+{
+    const auto path = temporary_path("failed-basic-settings-test");
+    {
+        std::ofstream stream(path, std::ios::binary);
+        stream << "# must survive a failed save\n[general]\nshake_enabled = [\n";
+    }
+    const auto before = read_all(path);
+
+    zmouse::config::Settings settings;
+    settings.shake_enabled = true;
+    check(!zmouse::config::persist_basic_settings(path, settings), "invalid existing TOML rejects a settings save");
+    check(read_all(path) == before, "a rejected settings save leaves the original file byte-for-byte unchanged");
     remove_test_file(path);
 }
 
@@ -494,6 +512,7 @@ int main()
     test_preferences_create_a_missing_configuration();
     test_basic_settings_are_persisted_without_losing_comments();
     test_basic_settings_create_a_missing_configuration();
+    test_failed_basic_persistence_preserves_the_existing_file();
     test_diagnostics_report_contains_effective_state_without_input_history();
 
     if (failures == 0)
