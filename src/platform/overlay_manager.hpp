@@ -67,10 +67,25 @@ class OverlayManager final
     ATOM ring_class_{};
     std::vector<MonitorOverlay> overlays_;
     HWND ring_window_{};
-    HDC ring_dc_{};
-    HBITMAP ring_bitmap_{};
-    HGDIOBJ ring_old_bitmap_{};
-    std::uint32_t* ring_pixels_{};
+    struct DibSurface
+    {
+        HDC dc{};
+        HBITMAP bitmap{};
+        HGDIOBJ old_bitmap{};
+        std::uint32_t* pixels{};
+        SIZE size{};
+
+        DibSurface() = default;
+        ~DibSurface() { destroy(); }
+        DibSurface(const DibSurface&) = delete;
+        DibSurface& operator=(const DibSurface&) = delete;
+        DibSurface(DibSurface&& other) noexcept;
+        DibSurface& operator=(DibSurface&& other) noexcept;
+
+        [[nodiscard]] bool create(SIZE s) noexcept;
+        void destroy() noexcept;
+    };
+    DibSurface ring_surface_;
     SIZE ring_bitmap_capacity_{};
     SIZE ring_size_{};
     std::int32_t ring_base_radius_px_{};
@@ -81,10 +96,7 @@ class OverlayManager final
     std::uint8_t painted_crosshair_alpha_{};
     bool ring_bitmap_dirty_{};
     HWND cursor_window_{};
-    HDC cursor_dc_{};
-    HBITMAP cursor_bitmap_{};
-    HGDIOBJ cursor_old_bitmap_{};
-    std::uint32_t* cursor_pixels_{};
+    DibSurface cursor_surface_;
     SIZE cursor_size_{};
     POINT cursor_hotspot_{};
     HCURSOR rendered_cursor_{};

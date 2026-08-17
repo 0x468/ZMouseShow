@@ -279,11 +279,11 @@ MagnifierWindow::MagnifierWindow() noexcept
 {
     try
     {
-        impl_ = new Impl{};
+        impl_ = std::make_unique<Impl>();
     }
     catch (...)
     {
-        impl_ = nullptr;
+        impl_.reset();
     }
 }
 
@@ -301,7 +301,8 @@ MagnifierWindow::~MagnifierWindow()
             UnregisterClassW(magnifier_class_name, impl_->instance);
         }
     }
-    delete impl_;
+    // unique_ptr releases Impl here; destructor must be defined in the
+    // translation unit where Impl is complete (i.e. this .cpp file).
 }
 
 bool MagnifierWindow::initialize(const HINSTANCE instance) noexcept

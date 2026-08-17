@@ -1,5 +1,8 @@
 #include "zmouse/diagnostics/report.hpp"
 
+#include <windows.h>
+
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string_view>
@@ -178,15 +181,33 @@ bool write_report(const std::filesystem::path& path, const Snapshot& snapshot) n
 {
     try
     {
-        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-        if (!stream)
+        auto temporary = path;
+        temporary += L".tmp-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+
         {
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            if (!stream)
+            {
+                return false;
+            }
+            const auto report = build_report(snapshot);
+            stream.write(report.data(), static_cast<std::streamsize>(report.size()));
+            stream.flush();
+            if (!stream)
+            {
+                std::error_code ignored;
+                static_cast<void>(std::filesystem::remove(temporary, ignored));
+                return false;
+            }
+        }
+
+        if (MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE)
+        {
+            std::error_code ignored;
+            static_cast<void>(std::filesystem::remove(temporary, ignored));
             return false;
         }
-        const auto report = build_report(snapshot);
-        stream.write(report.data(), static_cast<std::streamsize>(report.size()));
-        stream.flush();
-        return stream.good();
+        return true;
     }
     catch (...)
     {

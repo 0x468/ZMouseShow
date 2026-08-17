@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "zmouse/magnifier/settings.hpp"
+#include <memory>
 
 namespace zmouse::platform
 {
@@ -25,6 +26,6 @@ class MagnifierWindow final
 
   private:
     struct Impl;
-    Impl* impl_{};
+    std::unique_ptr<Impl> impl_;
 };
 } // namespace zmouse::platform
