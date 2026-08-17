@@ -26,6 +26,9 @@ struct ActivationPolicyConfig
 {
     FullscreenSuppression fullscreen_suppression{FullscreenSuppression::automatic};
     std::vector<std::string> excluded_processes{};
+    // Pre-normalized cache of excluded_processes; rebuilt by config loader.
+    // should_allow_activation reads this list directly to avoid per-call normalization.
+    std::vector<std::string> normalized_excluded{};
 };
 
 struct ForegroundContext

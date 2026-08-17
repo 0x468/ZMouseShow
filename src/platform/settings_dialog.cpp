@@ -1,6 +1,7 @@
 #include "settings_dialog.hpp"
 
 #include "../../resources/resource.h"
+#include "zmouse/platform/string_util.hpp"
 #include <algorithm>
 #include <commctrl.h>
 #include <cstdint>
@@ -33,34 +34,6 @@ namespace
         return {};
     }
     return result;
-}
-
-[[nodiscard]] std::optional<std::string> utf8_from_wide(const std::wstring_view value) noexcept
-{
-    try
-    {
-        if (value.empty())
-        {
-            return std::string{};
-        }
-        const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
-                                             static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-        if (size <= 0)
-        {
-            return std::nullopt;
-        }
-        std::string result(static_cast<std::size_t>(size), '\0');
-        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
-                                result.data(), size, nullptr, nullptr) != size)
-        {
-            return std::nullopt;
-        }
-        return result;
-    }
-    catch (...)
-    {
-        return std::nullopt;
-    }
 }
 
 [[nodiscard]] std::wstring format_excluded_processes(const std::vector<std::string>& processes)
@@ -102,12 +75,12 @@ namespace
             const auto end = text.find_first_of(L";\r\n", start);
             const auto token =
                 std::wstring_view(text).substr(start, end == std::wstring::npos ? text.size() - start : end - start);
-            const auto utf8 = utf8_from_wide(token);
-            if (!utf8)
+            const auto utf8 = wide_to_utf8(token);
+            if (utf8.empty())
             {
                 return std::nullopt;
             }
-            if (const auto normalized = policy::normalize_executable_name(*utf8))
+            if (const auto normalized = policy::normalize_executable_name(utf8))
             {
                 if (std::ranges::find(result, *normalized) == result.end())
                 {
@@ -660,6 +633,14 @@ class SettingsDialog final
             : fullscreen_suppression == 1 ? policy::FullscreenSuppression::off
                                           : policy::FullscreenSuppression::strict;
         settings.activation_policy.excluded_processes = *excluded_processes;
+        settings.activation_policy.normalized_excluded.clear();
+        for (const auto& proc : *excluded_processes)
+        {
+            if (auto normalized = policy::normalize_executable_name(proc))
+            {
+                settings.activation_policy.normalized_excluded.push_back(std::move(*normalized));
+            }
+        }
         settings.startup_enabled = IsDlgButtonChecked(dialog_, IDC_STARTUP_ENABLED) == BST_CHECKED;
         settings.double_ctrl.side = side == 0   ? input::ControlSide::left
                                     : side == 1 ? input::ControlSide::right

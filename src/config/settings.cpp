@@ -434,6 +434,14 @@ void apply_table(const toml::table& document, Settings& settings) noexcept
         if (const auto processes = parse_excluded_processes(behavior->get("excluded_processes")))
         {
             settings.activation_policy.excluded_processes = *processes;
+            // Pre-normalize for O(1) lookup in should_allow_activation
+            for (const auto& proc : *processes)
+            {
+                if (auto normalized = policy::normalize_executable_name(proc))
+                {
+                    settings.activation_policy.normalized_excluded.push_back(std::move(*normalized));
+                }
+            }
         }
     }
 

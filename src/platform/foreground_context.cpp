@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include "zmouse/platform/string_util.hpp"
 #include <algorithm>
 #include <dwmapi.h>
 #include <filesystem>
@@ -12,26 +13,6 @@ namespace zmouse::platform
 {
 namespace
 {
-std::string utf8_from_wide(const std::wstring_view value)
-{
-    if (value.empty())
-    {
-        return {};
-    }
-    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
-                                         nullptr, 0, nullptr, nullptr);
-    if (size <= 0)
-    {
-        return {};
-    }
-    std::string result(static_cast<std::size_t>(size), '\0');
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(),
-                            size, nullptr, nullptr) != size)
-    {
-        return {};
-    }
-    return result;
-}
 
 std::string foreground_executable_name(const HWND window)
 {
@@ -55,7 +36,7 @@ std::string foreground_executable_name(const HWND window)
     {
         return {};
     }
-    return utf8_from_wide(std::filesystem::path(std::wstring_view(path.data(), path_size)).filename().wstring());
+    return wide_to_utf8(std::filesystem::path(std::wstring_view(path.data(), path_size)).filename().wstring());
 }
 
 bool is_fullscreen_window(const HWND window, const RECT monitor_rect) noexcept

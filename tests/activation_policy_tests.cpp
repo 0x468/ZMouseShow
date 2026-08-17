@@ -5,12 +5,14 @@
 
 namespace
 {
+int failures = 0;
+
 void check(const bool condition, const std::string_view message)
 {
     if (!condition)
     {
         std::cerr << "FAILED: " << message << '\n';
-        std::exit(EXIT_FAILURE);
+        ++failures;
     }
 }
 
@@ -54,6 +56,7 @@ void test_pointer_confinement_and_exclusions()
           "pointer confinement is immersive for automatic mode");
 
     config.excluded_processes = {"editor.exe"};
+    config.normalized_excluded = {"editor.exe"};
     check(
         !zmouse::policy::should_allow_activation(config, TriggerSource::double_ctrl, {.executable_name = "EDITOR.EXE"}),
         "exclusion is case insensitive");
@@ -67,5 +70,5 @@ int main()
     test_executable_normalization();
     test_fullscreen_modes();
     test_pointer_confinement_and_exclusions();
-    return EXIT_SUCCESS;
+    return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

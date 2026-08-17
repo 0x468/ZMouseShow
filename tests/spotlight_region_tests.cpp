@@ -57,6 +57,29 @@ void test_distinct_shape_profiles()
         static_cast<void>(DeleteObject(diamond));
     }
 }
+void test_negative_coordinates()
+{
+    // Negative-origin monitor (e.g. secondary display to the left of primary)
+    const zmouse::overlay::Rect bounds{-1920, -200, 0, 880};
+    const HRGN region = zmouse::platform::create_spotlight_region(bounds, zmouse::overlay::SpotlightShape::circle);
+    check(region != nullptr, "circle region with negative origin can be created");
+    if (region != nullptr)
+    {
+        check(PtInRegion(region, -960, 340) != FALSE, "negative-origin circle contains its center");
+        static_cast<void>(DeleteObject(region));
+    }
+}
+
+void test_zero_size()
+{
+    const zmouse::overlay::Rect zero_width{0, 0, 0, 100};
+    const zmouse::overlay::Rect zero_height{0, 0, 100, 0};
+    check(zmouse::platform::create_spotlight_region(zero_width, zmouse::overlay::SpotlightShape::circle) == nullptr,
+          "zero-width region returns nullptr");
+    check(zmouse::platform::create_spotlight_region(zero_height, zmouse::overlay::SpotlightShape::circle) == nullptr,
+          "zero-height region returns nullptr");
+}
+
 } // namespace
 
 int main()
@@ -65,6 +88,8 @@ int main()
     test_shape(zmouse::overlay::SpotlightShape::rounded_square, "rounded-square region can be created");
     test_shape(zmouse::overlay::SpotlightShape::diamond, "diamond region can be created");
     test_distinct_shape_profiles();
+    test_negative_coordinates();
+    test_zero_size();
     if (failures == 0)
     {
         std::cout << "All spotlight region tests passed.\n";

@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include "zmouse/platform/string_util.hpp"
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <iterator>
@@ -35,26 +36,6 @@ struct DesktopDuplicationCapture::Impl
 
 namespace
 {
-[[nodiscard]] std::string narrow(const wchar_t* value) noexcept
-{
-    if (value == nullptr || *value == L'\0')
-    {
-        return {};
-    }
-    const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, -1, nullptr, 0, nullptr, nullptr);
-    if (length <= 1)
-    {
-        return {};
-    }
-    std::string result(static_cast<std::size_t>(length), '\0');
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, -1, result.data(), length, nullptr, nullptr) <= 0)
-    {
-        return {};
-    }
-    result.pop_back();
-    return result;
-}
-
 void set_failure(DesktopDuplicationCapture::Impl& impl, const HRESULT result) noexcept
 {
     using capture::FailureCategory;
@@ -144,7 +125,7 @@ bool DesktopDuplicationCapture::start(const HMONITOR monitor) noexcept
             DXGI_OUTPUT_DESC output_desc{};
             if (SUCCEEDED(impl_->output->GetDesc(&output_desc)) && output_desc.Monitor == monitor)
             {
-                impl_->lifecycle.diagnostics().output = narrow(output_desc.DeviceName);
+                impl_->lifecycle.diagnostics().output = wide_to_utf8(output_desc.DeviceName);
                 impl_->output_bounds = output_desc.DesktopCoordinates;
                 matched = true;
                 break;
@@ -162,7 +143,7 @@ bool DesktopDuplicationCapture::start(const HMONITOR monitor) noexcept
         impl_->lifecycle.mark_failure(capture::FailureCategory::mode_unsupported);
         return false;
     }
-    impl_->lifecycle.diagnostics().adapter = narrow(adapter_desc.Description);
+    impl_->lifecycle.diagnostics().adapter = wide_to_utf8(adapter_desc.Description);
 
     constexpr D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
     D3D_FEATURE_LEVEL selected{};

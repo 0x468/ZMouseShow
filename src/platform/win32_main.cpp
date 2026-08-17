@@ -8,6 +8,7 @@
 #include "overlay_manager.hpp"
 #include "settings_dialog.hpp"
 #include "startup_registration.hpp"
+#include "zmouse/platform/string_util.hpp"
 #include "zmouse/config/settings.hpp"
 #include "zmouse/diagnostics/report.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
@@ -68,33 +69,7 @@ struct MonitorCollection
     bool success{true};
 };
 
-[[nodiscard]] std::string wide_to_utf8(const std::wstring_view value) noexcept
-{
-    try
-    {
-        if (value.empty())
-        {
-            return {};
-        }
-        const int required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
-                                                 static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-        if (required <= 0)
-        {
-            return {};
-        }
-        std::string result(static_cast<std::size_t>(required), '\0');
-        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
-                                result.data(), required, nullptr, nullptr) != required)
-        {
-            return {};
-        }
-        return result;
-    }
-    catch (...)
-    {
-        return {};
-    }
-}
+using zmouse::platform::wide_to_utf8;
 
 [[nodiscard]] std::string current_utc_time()
 {

@@ -41,12 +41,8 @@ bool should_allow_activation(const ActivationPolicyConfig& config, const Trigger
                              const ForegroundContext& foreground) noexcept
 {
     const auto executable = normalize_executable_name(foreground.executable_name);
-    if (executable && std::ranges::any_of(config.excluded_processes,
-                                          [&](const std::string_view excluded)
-                                          {
-                                              const auto normalized = normalize_executable_name(excluded);
-                                              return normalized && *normalized == *executable;
-                                          }))
+    if (executable && std::ranges::any_of(config.normalized_excluded,
+                                          [&](const std::string& excluded) { return excluded == *executable; }))
     {
         return false;
     }
