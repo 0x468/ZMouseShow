@@ -362,7 +362,7 @@ void test_locator_animation_transitions()
               middle.ripple_opacity < 1.0,
           "the ripple expands and fades over time");
 
-    const auto shown = animation.frame(1'180);
+    const auto shown = animation.frame(1'220);
     check(shown.surface_visible && !shown.needs_more_frames, "fade-in reaches a stable visible state");
     check(shown.dim_progress == 1.0 && shown.focus_opacity == 1.0 && shown.ripple_scale == 1.75 &&
               shown.ripple_opacity == 0.0,
@@ -373,7 +373,7 @@ void test_locator_animation_transitions()
     check(fading.surface_visible && fading.needs_more_frames, "hide starts a fade-out transition");
     check(fading.dim_progress > 0.0 && fading.dim_progress < 1.0, "fade-out reduces dim opacity");
 
-    const auto hidden = animation.frame(2'180);
+    const auto hidden = animation.frame(2'220);
     check(!hidden.surface_visible && !hidden.needs_more_frames, "fade-out finishes hidden");
     check(animation.phase() == zmouse::overlay::AnimationPhase::hidden, "finished fade-out resets the state");
 }

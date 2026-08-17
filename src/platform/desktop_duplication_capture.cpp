@@ -234,7 +234,8 @@ capture::FrameResult DesktopDuplicationCapture::acquire_frame(ID3D11Texture2D** 
     const auto result = impl_->duplication->AcquireNextFrame(timeout_ms, &frame_info, &resource);
     if (result == DXGI_ERROR_WAIT_TIMEOUT)
     {
-        set_failure(*impl_, result);
+        // Zero-timeout polling returning no frame is expected; do not record
+        // it as a failure so that last_failure retains the most recent real error.
         return capture::FrameResult::no_frame;
     }
     if (FAILED(result))

@@ -324,6 +324,9 @@ void assign_double(const toml::table& table, const std::string_view key, double&
         {
             result += ", ";
         }
+        // NOTE: normalize_executable_name rejects ", \, and control characters,
+        // so no TOML escaping is needed here. If that validation ever changes,
+        // switch to toml++ string serialization to avoid injection.
         result += '"' + processes[index] + '"';
     }
     result += ']';
