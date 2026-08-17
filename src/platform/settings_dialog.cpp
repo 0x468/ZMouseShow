@@ -78,9 +78,10 @@ namespace
             const auto utf8 = wide_to_utf8(token);
             if (utf8.empty())
             {
-                return std::nullopt;
+                // Empty token (blank input, consecutive delimiters, whitespace-only).
+                // Skip silently; normalize_executable_name below rejects actual invalid names.
             }
-            if (const auto normalized = policy::normalize_executable_name(utf8))
+            else if (const auto normalized = policy::normalize_executable_name(utf8))
             {
                 if (std::ranges::find(result, *normalized) == result.end())
                 {
