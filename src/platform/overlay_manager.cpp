@@ -289,6 +289,7 @@ void OverlayManager::hide() noexcept
         ShowWindow(overlay.window, SW_HIDE);
     }
     visible_ = false;
+    ring_window_pos_ = {-1, -1};
 }
 
 bool OverlayManager::visible() const noexcept
@@ -437,23 +438,43 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
     const auto monitor_width = overlay::width(monitor_bounds);
     const auto monitor_height = overlay::height(monitor_bounds);
 
-    HRGN full_region = CreateRectRgn(0, 0, monitor_width, monitor_height);
-    HRGN hole_region = create_spotlight_region(hole, spotlight_shape_);
-    if (full_region == nullptr || hole_region == nullptr)
+    // Create or reuse the hole region at the origin, then offset to target position
+    if (monitor_overlay.cached_hole == nullptr || monitor_overlay.cached_hole_shape != spotlight_shape_ ||
+        monitor_overlay.cached_hole_radius != radius_px)
     {
-        if (full_region != nullptr)
+        if (monitor_overlay.cached_hole != nullptr)
         {
-            DeleteObject(full_region);
+            DeleteObject(monitor_overlay.cached_hole);
         }
-        if (hole_region != nullptr)
-        {
-            DeleteObject(hole_region);
-        }
+        const overlay::Rect origin_hole{0, 0, radius_px * 2, radius_px * 2};
+        monitor_overlay.cached_hole = create_spotlight_region(origin_hole, spotlight_shape_);
+        monitor_overlay.cached_hole_shape = spotlight_shape_;
+        monitor_overlay.cached_hole_radius = radius_px;
+        monitor_overlay.cached_hole_at = {-1, -1};
+    }
+    if (monitor_overlay.cached_hole == nullptr)
+    {
         return false;
     }
 
-    const int combine_result = CombineRgn(full_region, full_region, hole_region, RGN_DIFF);
-    DeleteObject(hole_region);
+    // Offset cached hole to the target position
+    const overlay::Point target{hole.left, hole.top};
+    if (!(target == monitor_overlay.cached_hole_at))
+    {
+        const auto dx = target.x - monitor_overlay.cached_hole_at.x;
+        const auto dy = target.y - monitor_overlay.cached_hole_at.y;
+        OffsetRgn(monitor_overlay.cached_hole, dx, dy);
+        monitor_overlay.cached_hole_at = target;
+    }
+
+    // SetWindowRgn takes ownership — must create a fresh full_region each call
+    HRGN full_region = CreateRectRgn(0, 0, monitor_width, monitor_height);
+    if (full_region == nullptr)
+    {
+        return false;
+    }
+
+    const int combine_result = CombineRgn(full_region, full_region, monitor_overlay.cached_hole, RGN_DIFF);
     if (combine_result == ERROR)
     {
         DeleteObject(full_region);
@@ -615,10 +636,17 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) noexcept
             return false;
         }
         ring_bitmap_dirty_ = false;
+        ring_window_pos_ = destination;
         return SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
     }
 
+    // Skip SetWindowPos if position hasn't changed
+    if (destination.x == ring_window_pos_.x && destination.y == ring_window_pos_.y)
+    {
+        return true;
+    }
+    ring_window_pos_ = destination;
     return SetWindowPos(ring_window_, HWND_TOPMOST, destination.x, destination.y, 0, 0,
                         SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
 }
@@ -839,6 +867,10 @@ void OverlayManager::destroy_windows() noexcept
     }
     for (const auto& overlay : overlays_)
     {
+        if (overlay.cached_hole != nullptr)
+        {
+            DeleteObject(overlay.cached_hole);
+        }
         DestroyWindow(overlay.window);
     }
     overlays_.clear();

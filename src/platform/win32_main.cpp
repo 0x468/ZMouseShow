@@ -421,6 +421,17 @@ class Application final
         key_down_.set(VK_MENU, key_is_down(VK_LMENU));
         key_down_.set(VK_MENU + 256U, key_is_down(VK_RMENU));
 
+        // Rebuild non-modifier key counter
+        non_modifier_key_count_ = 0;
+        for (std::size_t vk = 1; vk < 0xFFU; ++vk)
+        {
+            if (!is_modifier_virtual_key(static_cast<UINT>(vk)) &&
+                (key_down_[vk] || key_down_[vk + 256U]))
+            {
+                ++non_modifier_key_count_;
+            }
+        }
+
         mouse_buttons_ = 0;
         if (key_is_down(VK_LBUTTON))
         {
@@ -946,6 +957,7 @@ class Application final
             return;
         }
 
+        const bool had_pending = cursor_update_pending_;
         update_overlay_cursor();
         if (!overlay_manager_.visible())
         {
@@ -953,21 +965,29 @@ class Application final
         }
 
         const ULONGLONG now = GetTickCount64();
-        const auto frame = locator_animation_.frame(now);
-        if (!frame.surface_visible)
+        const auto phase = locator_animation_.phase();
+        const bool steady_state = phase == zmouse::overlay::AnimationPhase::visible;
+
+        // In steady state with no cursor movement, all frame parameters are
+        // already at their final values — skip the entire render pipeline.
+        if (!steady_state || had_pending)
         {
-            hide_overlay_immediately();
-            return;
-        }
-        overlay_manager_.set_animation_frame(frame.dim_progress, frame.focus_opacity, frame.ripple_scale,
-                                             frame.ripple_opacity);
-        if (!overlay_manager_.visible())
-        {
-            hide_overlay_immediately();
-            return;
+            const auto frame = locator_animation_.frame(now);
+            if (!frame.surface_visible)
+            {
+                hide_overlay_immediately();
+                return;
+            }
+            overlay_manager_.set_animation_frame(frame.dim_progress, frame.focus_opacity, frame.ripple_scale,
+                                                 frame.ripple_opacity);
+            if (!overlay_manager_.visible())
+            {
+                hide_overlay_immediately();
+                return;
+            }
         }
 
-        if (locator_animation_.phase() == zmouse::overlay::AnimationPhase::visible && auto_timeout_enabled_ &&
+        if (steady_state && auto_timeout_enabled_ &&
             (now - last_cursor_move_at_ >= overlay_idle_timeout_ms_ ||
              now - overlay_started_at_ >= overlay_max_duration_ms_))
         {
@@ -1205,6 +1225,16 @@ class Application final
         const bool repeated = pressed && key_down_[key_id];
         key_down_[key_id] = pressed;
 
+        // Maintain non-modifier key counter for O(1) any_other_key_down check
+        if (!repeated && !is_modifier_virtual_key(keyboard.VKey))
+        {
+            non_modifier_key_count_ += pressed ? 1 : -1;
+            if (non_modifier_key_count_ < 0)
+            {
+                non_modifier_key_count_ = 0; // defensive clamp
+            }
+        }
+
         const bool left_control = keyboard.VKey == VK_LCONTROL || (keyboard.VKey == VK_CONTROL && !extended);
         const bool right_control = keyboard.VKey == VK_RCONTROL || (keyboard.VKey == VK_CONTROL && extended);
 
@@ -1214,18 +1244,9 @@ class Application final
             dismiss_overlay();
         }
 
-        bool any_other_key_down = false;
-        bool any_other_non_modifier_key_down = false;
-        for (std::size_t index = 0; index < key_down_.size(); ++index)
-        {
-            if (index != key_id && key_down_[index])
-            {
-                any_other_key_down = true;
-                const auto virtual_key = static_cast<UINT>(index % 256U);
-                any_other_non_modifier_key_down =
-                    any_other_non_modifier_key_down || !is_modifier_virtual_key(virtual_key);
-            }
-        }
+        const bool current_is_modifier = is_modifier_virtual_key(keyboard.VKey);
+        const bool any_other_key_down = non_modifier_key_count_ > (current_is_modifier ? 0 : 1);
+        const bool any_other_non_modifier_key_down = any_other_key_down;
 
         if (!zmouse::input::triggers_armed(input_state()))
         {
@@ -1401,6 +1422,7 @@ class Application final
     bool tray_menu_open_{};
     bool settings_dialog_open_{};
     std::bitset<512> key_down_{};
+    int non_modifier_key_count_{};
     bool activation_pending_{};
     HANDLE animation_timer_{};
     bool animation_timer_running_{};

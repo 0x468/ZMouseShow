@@ -173,4 +173,11 @@ if(BUILD_TESTING)
             user32
     )
     zmouse_apply_project_options(zmouse_magnifier_benchmark)
+
+    add_executable(zmouse_perf_experiment
+        benchmarks/perf_experiment.cpp
+        src/platform/spotlight_region.cpp
+    )
+    target_link_libraries(zmouse_perf_experiment PRIVATE ZMouseShow::Core gdi32 user32)
+    zmouse_apply_project_options(zmouse_perf_experiment)
 endif()

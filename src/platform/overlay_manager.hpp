@@ -38,6 +38,10 @@ class OverlayManager final
         RECT bounds{};
         HWND window{};
         UINT dpi{96};
+        HRGN cached_hole{};          // pre-allocated hole region, reused via OffsetRgn
+        overlay::Point cached_hole_at{-1, -1}; // position of cached_hole
+        overlay::SpotlightShape cached_hole_shape{};
+        std::int32_t cached_hole_radius{};
     };
 
     static LRESULT CALLBACK overlay_window_proc(HWND window, UINT message, WPARAM w_param, LPARAM l_param) noexcept;
@@ -114,6 +118,7 @@ class OverlayManager final
     double ripple_scale_{1.0};
     double ripple_opacity_{};
     overlay::Point last_cursor_{};
+    POINT ring_window_pos_{-1, -1}; // cached ring window position
     bool visible_{};
 };
 } // namespace zmouse::platform
