@@ -3,6 +3,7 @@
 #include <hidusage.h>
 #include <shellapi.h>
 
+#include "resource.h"
 #include "display_simulator.hpp"
 #include "foreground_context.hpp"
 #include "overlay_manager.hpp"
@@ -71,6 +72,23 @@ struct MonitorCollection
 };
 
 using zmouse::platform::wide_to_utf8;
+
+[[nodiscard]] bool system_uses_light_taskbar() noexcept
+{
+    constexpr wchar_t personalize_key[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+    DWORD value{};
+    DWORD value_size = sizeof(value);
+    return RegGetValueW(HKEY_CURRENT_USER, personalize_key, L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr,
+                        &value, &value_size) == ERROR_SUCCESS &&
+           value != 0;
+}
+
+[[nodiscard]] HICON load_shared_icon(const HINSTANCE instance, const int resource_id, const int width,
+                                     const int height) noexcept
+{
+    return static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(resource_id), IMAGE_ICON, width, height,
+                                         LR_DEFAULTCOLOR | LR_SHARED));
+}
 
 [[nodiscard]] std::string current_utc_time()
 {
@@ -311,6 +329,10 @@ class Application final
         window_class.cbSize = sizeof(window_class);
         window_class.lpfnWndProc = window_proc;
         window_class.hInstance = instance_;
+        window_class.hIcon = load_shared_icon(instance_, IDI_ZMOUSE_APP, GetSystemMetrics(SM_CXICON),
+                                              GetSystemMetrics(SM_CYICON));
+        window_class.hIconSm = load_shared_icon(instance_, IDI_ZMOUSE_APP, GetSystemMetrics(SM_CXSMICON),
+                                                GetSystemMetrics(SM_CYSMICON));
         window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         window_class.lpszClassName = window_class_name;
 
@@ -351,7 +373,7 @@ class Application final
         tray_icon_.uID = tray_icon_id;
         tray_icon_.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
         tray_icon_.uCallbackMessage = message_tray;
-        tray_icon_.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        tray_icon_.hIcon = load_tray_icon();
         wcscpy_s(tray_icon_.szTip, window_title);
 
         if (Shell_NotifyIconW(NIM_ADD, &tray_icon_) == FALSE)
@@ -363,6 +385,40 @@ class Application final
         static_cast<void>(Shell_NotifyIconW(NIM_SETVERSION, &tray_icon_));
         tray_icon_added_ = true;
         return true;
+    }
+
+    [[nodiscard]] HICON load_tray_icon() const noexcept
+    {
+        const int resource_id = system_uses_light_taskbar() ? IDI_ZMOUSE_TRAY_DARK : IDI_ZMOUSE_TRAY_LIGHT;
+        if (auto* icon = load_shared_icon(instance_, resource_id, GetSystemMetrics(SM_CXSMICON),
+                                          GetSystemMetrics(SM_CYSMICON));
+            icon != nullptr)
+        {
+            return icon;
+        }
+        return LoadIconW(nullptr, IDI_APPLICATION);
+    }
+
+    void refresh_tray_icon() noexcept
+    {
+        if (!tray_icon_added_)
+        {
+            return;
+        }
+
+        const auto icon = load_tray_icon();
+        if (icon == nullptr || icon == tray_icon_.hIcon)
+        {
+            return;
+        }
+
+        auto update = tray_icon_;
+        update.uFlags = NIF_ICON;
+        update.hIcon = icon;
+        if (Shell_NotifyIconW(NIM_MODIFY, &update) != FALSE)
+        {
+            tray_icon_.hIcon = icon;
+        }
     }
 
     void remove_tray_icon() noexcept
@@ -1201,6 +1257,12 @@ class Application final
         case WM_WTSSESSION_CHANGE:
             hide_overlay_immediately();
             synchronize_input_state();
+            return 0;
+
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED:
+        case WM_DWMCOLORIZATIONCOLORCHANGED:
+            refresh_tray_icon();
             return 0;
 
         case WM_HOTKEY:

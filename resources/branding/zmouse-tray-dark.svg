@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">ZMouseShow dark notification area icon</title>
+  <desc id="desc">A monochrome ribbon Z with a locator focus for the Windows notification area.</desc>
+  <defs>
+    <mask id="focus-hole">
+      <rect width="24" height="24" fill="white"/>
+      <circle cx="12" cy="12.4" r="2.25" fill="black"/>
+    </mask>
+  </defs>
+  <g fill="#102544">
+    <path d="M5.1 4.8h14.1l-2 2.8h-5.5l-3.3 8.8h10.5l-2 2.8H4.6l3.3-8.8h5.4l2-2.8H4.2Z" mask="url(#focus-hole)"/>
+    <circle cx="12" cy="12.4" r="1"/>
+  </g>
+  <path d="M12 1.8v2.3M12 20v2.2M1.8 12h2.3M20 12h2.2" stroke="#102544" stroke-width="1.7" stroke-linecap="round"/>
+</svg>

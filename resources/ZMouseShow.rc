@@ -3,6 +3,10 @@
 #include <winres.h>
 #include "resource.h"
 
+IDI_ZMOUSE_APP ICON "branding\\zmouse-app.ico"
+IDI_ZMOUSE_TRAY_LIGHT ICON "branding\\zmouse-tray-light.ico"
+IDI_ZMOUSE_TRAY_DARK ICON "branding\\zmouse-tray-dark.ico"
+
 IDD_SETTINGS DIALOGEX 0, 0, 330, 555
 STYLE DS_SETFONT | DS_CENTER | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE
 EXSTYLE WS_EX_CONTROLPARENT
@@ -74,8 +78,8 @@ BEGIN
 END
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION 0,4,2,0
+ PRODUCTVERSION 0,4,2,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -90,13 +94,14 @@ BEGIN
     BEGIN
         BLOCK "080404b0"
         BEGIN
-            VALUE "CompanyName", "ZMouseShow contributors\0"
-            VALUE "FileDescription", "Portable mouse locator\0"
-            VALUE "FileVersion", "0.1.0\0"
+            VALUE "CompanyName", "0x468\0"
+            VALUE "FileDescription", "Portable mouse locator for Windows\0"
+            VALUE "FileVersion", "0.4.2.0\0"
             VALUE "InternalName", "ZMouseShow\0"
+            VALUE "LegalCopyright", "Copyright © 2026 0x468\0"
             VALUE "OriginalFilename", "ZMouseShow.exe\0"
             VALUE "ProductName", "ZMouseShow\0"
-            VALUE "ProductVersion", "0.1.0\0"
+            VALUE "ProductVersion", "0.4.2\0"
         END
     END
     BLOCK "VarFileInfo"

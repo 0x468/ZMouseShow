@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>ZMouseShow · 图标实验室</title>
+  <style>
+    :root {
+      --ink: #142033;
+      --muted: #5d6b7e;
+      --line: #dce4ee;
+      --panel: #ffffff;
+      --canvas: #f4f7fb;
+      --soft: #eaf5ff;
+      --blue: #2388f2;
+      --navy: #102544;
+      --focus: #006fc9;
+      font-family: "Segoe UI Variable Text", "Segoe UI", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(31, 118, 204, .035) 1px, transparent 1px),
+        linear-gradient(rgba(31, 118, 204, .035) 1px, transparent 1px),
+        var(--canvas);
+      background-size: 28px 28px;
+      min-height: 100vh;
+    }
+
+    button, input { font: inherit; }
+
+    button {
+      color: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible, input:focus-visible {
+      outline: 3px solid rgba(35, 136, 242, .35);
+      outline-offset: 2px;
+    }
+
+    .shell {
+      width: min(1480px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 28px 0 52px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .identity { display: flex; align-items: center; gap: 15px; }
+    .identity-mark { width: 48px; height: 48px; flex: 0 0 auto; }
+    h1 { margin: 0; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.035em; }
+    .subtitle { color: var(--muted); margin-top: 4px; font-size: 14px; }
+
+    .origin-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: rgba(255,255,255,.82);
+      color: #40506a;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .origin-pill::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #37b6ff;
+      box-shadow: 0 0 0 4px #dff4ff;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 390px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .intro, .inspector, .candidate-card, .decision-note {
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .intro {
+      border-radius: 18px;
+      padding: 20px 22px;
+      margin-bottom: 16px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .eyebrow {
+      color: #1975c4;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .intro h2 { margin: 0 0 7px; font-size: 19px; }
+    .intro p { color: var(--muted); margin: 0; line-height: 1.65; font-size: 14px; max-width: 760px; }
+    .brand-dna { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .dna-chip { background: #f0f5fb; border-radius: 8px; padding: 7px 9px; color: #40506a; font-size: 12px; }
+
+    .candidate-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .candidate-card {
+      position: relative;
+      border-radius: 18px;
+      padding: 16px;
+      text-align: left;
+      transition: border-color 180ms ease, background 180ms ease;
+      min-width: 0;
+    }
+
+    .candidate-card:hover { border-color: #9bbddd; background: #fbfdff; }
+    .candidate-card[aria-pressed="true"] {
+      border-color: var(--blue);
+      box-shadow: inset 0 0 0 1px var(--blue);
+      background: #f8fcff;
+    }
+
+    .candidate-card[aria-pressed="true"]::after {
+      content: "已选择";
+      position: absolute;
+      right: 13px;
+      top: 13px;
+      color: #086bbd;
+      background: #e3f3ff;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .recommended {
+      position: absolute;
+      left: 13px;
+      top: 13px;
+      background: #102544;
+      color: white;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .candidate-visual {
+      display: grid;
+      grid-template-columns: minmax(130px, 1fr) 86px;
+      gap: 12px;
+      height: 156px;
+      margin-bottom: 14px;
+    }
+
+    .app-stage, .tray-stage {
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .app-stage {
+      background: #eef3f8;
+      background-image: radial-gradient(#cfdae6 1px, transparent 1px);
+      background-size: 12px 12px;
+    }
+
+    .app-stage svg { width: 100px; height: 100px; filter: drop-shadow(0 9px 14px rgba(13, 38, 69, .18)); }
+    .tray-stage { flex-direction: column; gap: 13px; background: linear-gradient(180deg, #263344 0 50%, #f4f6f9 50%); }
+    .tray-stage svg { width: 25px; height: 25px; display: block; }
+    .tray-light { color: white; }
+    .tray-dark { color: #182334; }
+
+    .candidate-name { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+    .candidate-name strong { font-size: 16px; }
+    .candidate-code { color: #8090a4; font: 600 11px/1 Consolas, monospace; }
+    .candidate-desc { color: var(--muted); font-size: 13px; line-height: 1.55; min-height: 40px; }
+    .scores { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
+    .score { border: 1px solid #dce6f0; border-radius: 7px; padding: 4px 6px; font-size: 11px; color: #536276; background: white; }
+
+    .inspector {
+      border-radius: 20px;
+      padding: 18px;
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+    }
+
+    .inspector-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+    .inspector-title { font-size: 15px; font-weight: 700; }
+    .reset {
+      border: 0;
+      background: transparent;
+      color: #3375ad;
+      padding: 6px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .reset:hover { background: #eef7ff; }
+
+    .segment {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: #edf2f7;
+      padding: 3px;
+      border-radius: 10px;
+      margin-bottom: 13px;
+    }
+
+    .segment button {
+      border: 0;
+      border-radius: 7px;
+      padding: 8px;
+      background: transparent;
+      color: #5c6b7e;
+      font-size: 13px;
+    }
+    .segment button[aria-pressed="true"] { background: white; color: var(--ink); box-shadow: 0 1px 3px rgba(17,38,65,.13); font-weight: 650; }
+
+    .hero-preview {
+      min-height: 238px;
+      border-radius: 14px;
+      overflow: hidden;
+      margin-bottom: 13px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1px solid #dbe3ec;
+    }
+
+    .preview-half { display: flex; align-items: center; justify-content: center; position: relative; }
+    .preview-half:first-child { background: #edf2f7; }
+    .preview-half:last-child { background: #202b3a; }
+    .preview-half::after { position: absolute; left: 10px; bottom: 8px; font-size: 10px; opacity: .65; }
+    .preview-half:first-child::after { content: "浅色环境"; color: #425066; }
+    .preview-half:last-child::after { content: "深色环境"; color: white; }
+    .hero-preview svg { width: 122px; height: 122px; }
+    .hero-preview.app svg { filter: drop-shadow(0 14px 18px rgba(5,22,43,.2)); }
+    .hero-preview.tray svg { width: 42px; height: 42px; }
+    .hero-preview.tray .preview-half:first-child { color: #152237; }
+    .hero-preview.tray .preview-half:last-child { color: #fff; }
+
+    .size-strip {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      background: #f5f8fb;
+      border-radius: 11px;
+      margin-bottom: 17px;
+    }
+
+    .size-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 50px; }
+    .size-cell span { color: #738196; font-size: 10px; }
+    .size-cell svg { display: block; }
+
+    .controls { display: grid; gap: 13px; }
+    .control-row { display: grid; grid-template-columns: 118px minmax(0, 1fr) 42px; gap: 10px; align-items: center; }
+    .control-row label, .toggle-row label { color: #47566b; font-size: 12px; }
+    .control-value { text-align: right; color: #718096; font: 600 11px/1 Consolas, monospace; }
+    input[type="range"] { width: 100%; accent-color: var(--blue); }
+
+    .colors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .color-field { display: grid; gap: 5px; color: #64748b; font-size: 10px; text-align: center; }
+    .color-field input { width: 100%; height: 32px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: white; cursor: pointer; }
+
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch span { position: absolute; inset: 0; border-radius: 999px; background: #bdc8d5; transition: background 180ms ease; }
+    .switch span::after { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: white; transition: transform 180ms ease; box-shadow: 0 1px 2px rgba(0,0,0,.22); }
+    .switch input:checked + span { background: var(--blue); }
+    .switch input:checked + span::after { transform: translateX(16px); }
+
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+    .action {
+      border: 1px solid #b7c7d8;
+      border-radius: 9px;
+      background: white;
+      padding: 9px 10px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .action:hover { background: #f4f9fd; border-color: #7ea8cf; }
+    .action.primary { color: white; background: #126fc1; border-color: #126fc1; }
+    .action.primary:hover { background: #0a609f; }
+
+    .decision-note {
+      border-radius: 16px;
+      margin-top: 16px;
+      padding: 16px 18px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      color: #4f5e71;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .note-mark { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: #e7f4ff; color: #1477c8; font-weight: 800; flex: 0 0 auto; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translate(-50%, 12px);
+      background: #102544;
+      color: white;
+      border-radius: 9px;
+      padding: 10px 14px;
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 180ms ease;
+      z-index: 20;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 1040px) {
+      .layout { grid-template-columns: 1fr; }
+      .inspector { position: relative; top: 0; max-height: none; }
+    }
+
+    @media (max-width: 680px) {
+      .shell { width: min(100% - 24px, 1480px); padding-top: 16px; }
+      header, .intro { align-items: flex-start; }
+      header { flex-direction: column; }
+      .origin-pill { white-space: normal; }
+      .intro { grid-template-columns: 1fr; }
+      .brand-dna { justify-content: flex-start; }
+      .candidate-grid { grid-template-columns: 1fr; }
+      .control-row { grid-template-columns: 96px minmax(0, 1fr) 38px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: 0s !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="identity">
+        <div class="identity-mark" id="headerMark" aria-hidden="true"></div>
+        <div>
+          <h1>ZMouseShow 图标实验室</h1>
+          <div class="subtitle">应用图标、任务栏与通知区域小图标的同屏验证</div>
+        </div>
+      </div>
+      <div class="origin-pill">继承 Ztermy 的 ribbon Z / navy / cyan-blue 视觉基因</div>
+    </header>
+
+    <div class="layout">
+      <section>
+        <div class="intro">
+          <div>
+            <div class="eyebrow">Design direction</div>
+            <h2>先选识别轮廓，再微调颜色与比例</h2>
+            <p>下面六套方案共享 Z 系列骨架，区别只在“鼠标定位”的表达。每张卡片同时展示应用图标和通知区域图标；判断时请优先看 16 px 是否仍然清楚。</p>
+          </div>
+          <div class="brand-dna" aria-label="品牌设计原则">
+            <span class="dna-chip">深海军蓝底</span>
+            <span class="dna-chip">带状 Z</span>
+            <span class="dna-chip">小尺寸减法</span>
+          </div>
+        </div>
+
+        <div class="candidate-grid" id="candidateGrid"></div>
+
+        <div class="decision-note">
+          <div class="note-mark">i</div>
+          <div><strong>建议：</strong>应用/任务栏图标可以保留彩色底板；通知区域图标建议使用单色透明底版本，以适配 Windows 的浅色、深色和高对比度任务栏。最终会从选中方案导出 SVG，再生成包含 16/20/24/32/48/64/128/256 px 的 ICO。</div>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="图标参数调整面板">
+        <div class="inspector-top">
+          <div class="inspector-title" id="selectionTitle">聚焦 Z · Focus</div>
+          <button class="reset" id="resetButton" type="button">恢复初始</button>
+        </div>
+
+        <div class="segment" aria-label="图标用途">
+          <button type="button" data-mode="app" aria-pressed="true">应用 / 任务栏</button>
+          <button type="button" data-mode="tray" aria-pressed="false">通知区域</button>
+        </div>
+
+        <div class="hero-preview app" id="heroPreview">
+          <div class="preview-half" id="heroLight"></div>
+          <div class="preview-half" id="heroDark"></div>
+        </div>
+
+        <div class="size-strip" id="sizeStrip" aria-label="不同尺寸预览"></div>
+
+        <div class="controls">
+          <div class="colors">
+            <label class="color-field">底板<input id="bgColor" type="color" value="#102544"></label>
+            <label class="color-field">高光<input id="accentStart" type="color" value="#7de7ff"></label>
+            <label class="color-field">主蓝<input id="accentEnd" type="color" value="#3c89ff"></label>
+          </div>
+
+          <div class="control-row">
+            <label for="corner">圆角</label>
+            <input id="corner" type="range" min="8" max="18" step="1" value="14">
+            <output class="control-value" id="cornerValue">14</output>
+          </div>
+
+          <div class="control-row">
+            <label for="iconScale">符号比例</label>
+            <input id="iconScale" type="range" min="86" max="112" step="1" value="100">
+            <output class="control-value" id="scaleValue">100%</output>
+          </div>
+
+          <div class="control-row">
+            <label for="stroke">定位线宽</label>
+            <input id="stroke" type="range" min="10" max="28" step="1" value="18">
+            <output class="control-value" id="strokeValue">1.8</output>
+          </div>
+
+          <div class="toggle-row">
+            <label for="simplify">小于等于 24 px 时自动简化细节</label>
+            <label class="switch">
+              <input id="simplify" type="checkbox" checked>
+              <span aria-hidden="true"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="action primary" id="downloadButton" type="button">下载当前 SVG</button>
+          <button class="action" id="copyButton" type="button">复制方案参数</button>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const variants = [
+      {
+        id: "focus", code: "A01", name: "聚焦 Z", en: "Focus",
+        description: "Z 的中心形成清晰焦点，最贴合“找到鼠标”，在 16 px 仍容易辨认。",
+        scores: ["品牌 5/5", "小尺寸 5/5", "语义 5/5"], recommended: true
+      },
+      {
+        id: "crosshair", code: "A02", name: "准星 Z", en: "Crosshair",
+        description: "用四向刻度强调定位感，工具属性更强，轮廓干净且克制。",
+        scores: ["品牌 4/5", "小尺寸 5/5", "语义 5/5"]
+      },
+      {
+        id: "orbit", code: "B01", name: "寻位轨道", en: "Orbit",
+        description: "以环形轨道呼应屏幕搜索过程，动态感最好，适合后续启动动画。",
+        scores: ["品牌 5/5", "小尺寸 4/5", "语义 4/5"]
+      },
+      {
+        id: "pointer", code: "B02", name: "光标 Z", en: "Pointer",
+        description: "直接加入鼠标箭头，理解成本最低；16 px 会自动省略内部切线。",
+        scores: ["品牌 4/5", "小尺寸 3/5", "语义 5/5"]
+      },
+      {
+        id: "pulse", code: "C01", name: "响应波纹", en: "Pulse",
+        description: "中心点与双侧波纹对应唤醒反馈，视觉更活跃，也更像常驻工具。",
+        scores: ["品牌 4/5", "小尺寸 4/5", "语义 4/5"]
+      },
+      {
+        id: "classic", code: "C02", name: "经典 Ribbon Z", en: "Classic",
+        description: "最接近 Ztermy 的家族轮廓，只靠产品名区分，品牌连续性最高。",
+        scores: ["品牌 5/5", "小尺寸 5/5", "语义 2/5"]
+      }
+    ];
+
+    const defaults = {
+      variant: "focus", mode: "app", bg: "#102544", accentStart: "#7de7ff",
+      accentEnd: "#3c89ff", corner: 14, iconScale: 100, stroke: 18, simplify: true
+    };
+
+    const saved = JSON.parse(localStorage.getItem("zmouse-icon-lab") || "null");
+    const state = Object.assign({}, defaults, saved || {});
+    let toastTimer = 0;
+
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+    }
+
+    function ribbon(gradientId) {
+      return `<path d="M5.55 4.85H15.85L14.45 6.75H9.75L6.75 13.25H15.55L14.15 15.15H4.15L7.15 8.65H11.55L12.95 6.75H4.75Z" fill="url(#${gradientId})"/>`;
+    }
+
+    function appMotif(variant, detail, lineWidth) {
+      const common = `fill="none" stroke="#f1fbff" stroke-width="${lineWidth}" stroke-linecap="round" stroke-linejoin="round"`;
+      if (variant === "focus") {
+        return `<circle cx="32" cy="33" r="${detail ? 7.2 : 5.3}" ${common}/><circle cx="32" cy="33" r="2.3" fill="#f1fbff"/>${detail ? `<path d="M32 21.5v4M32 40.5v4M20.5 33h4M39.5 33h4" ${common}/>` : ""}`;
+      }
+      if (variant === "crosshair") {
+        return `<circle cx="32" cy="33" r="2.3" fill="#f1fbff"/><path d="M32 21v7M32 38v7M20 33h7M37 33h7" ${common}/>`;
+      }
+      if (variant === "orbit") {
+        return `<path d="M21.5 37.5a12 12 0 0 1 15-15M42.5 28.5a12 12 0 0 1-15 15" ${common}/><circle cx="39.5" cy="23.8" r="2" fill="#f1fbff"/>`;
+      }
+      if (variant === "pointer") {
+        return `<path d="M27 23.5v18l4.8-5 3.1 7 3.3-1.5-3.1-6.8h6.5Z" fill="#f1fbff" stroke="${detail ? state.bg : "#f1fbff"}" stroke-width="${detail ? 1.15 : 0}" stroke-linejoin="round"/>`;
+      }
+      if (variant === "pulse") {
+        return `<circle cx="32" cy="33" r="2.5" fill="#f1fbff"/><path d="M25.5 27a8.3 8.3 0 0 0 0 12M38.5 27a8.3 8.3 0 0 1 0 12${detail ? "M21.5 23a14 14 0 0 0 0 20M42.5 23a14 14 0 0 1 0 20" : ""}" ${common}/>`;
+      }
+      return "";
+    }
+
+    function appSvg(variant, suffix, px = 256) {
+      const gradientId = `ribbon-${suffix}`;
+      const detail = !state.simplify || px > 24;
+      const lineWidth = (state.stroke / 10).toFixed(1);
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 64 64" role="img" aria-label="ZMouseShow ${esc(variant)} application icon">
+        <defs><linearGradient id="${gradientId}" x1="14" y1="14" x2="49" y2="49" gradientUnits="userSpaceOnUse"><stop stop-color="${state.accentStart}"/><stop offset="1" stop-color="${state.accentEnd}"/></linearGradient></defs>
+        <rect x="3.2" y="3.2" width="57.6" height="57.6" rx="${state.corner}" fill="${state.bg}"/>
+        <g transform="translate(32 32) scale(${state.iconScale / 100}) translate(-32 -32)">
+          <g transform="scale(3.2)">${ribbon(gradientId)}</g>
+          ${appMotif(variant, detail, lineWidth)}
+        </g>
+      </svg>`;
+    }
+
+    function trayShape(variant, suffix, px) {
+      const detail = !state.simplify || px > 24;
+      const z = `<path d="M5.1 4.8h14.1l-2 2.8h-5.5L8.4 16.4h10.5l-2 2.8H4.6l3.3-8.8h5.4l2-2.8H4.2Z" fill="currentColor"/>`;
+      if (variant === "classic") return z;
+      if (variant === "focus") return `<defs><mask id="m-${suffix}"><rect width="24" height="24" fill="white"/><circle cx="12" cy="12.4" r="2.25" fill="black"/></mask></defs><g mask="url(#m-${suffix})">${z}</g><circle cx="12" cy="12.4" r="1" fill="currentColor"/>${detail ? `<path d="M12 1.8v2.3M12 20v2.2M1.8 12h2.3M20 12h2.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>` : ""}`;
+      if (variant === "crosshair") return `${z}<path d="M12 1.7v4.1M12 18.2v4.1M1.7 12h4.1M18.2 12h4.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`;
+      if (variant === "orbit") return `${z}<path d="M4 15.5a9 9 0 0 1 11.8-11M20 8.5a9 9 0 0 1-11.8 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="17.6" cy="5.5" r="1.35" fill="currentColor"/>`;
+      if (variant === "pointer") return `<path d="M4.6 4.5v15l4-4.1 2.6 5.8 2.7-1.2-2.5-5.6h5.4Z" fill="currentColor"/>${detail ? `<path d="M14 4.8h5.2l-2 2.8h-3.9M15 19.2h1.9l2-2.8h-3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>` : ""}`;
+      if (variant === "pulse") return `${z}<circle cx="12" cy="12.3" r="1.25" fill="currentColor"/><path d="M6.2 7a7.5 7.5 0 0 0 0 10.5M17.8 7a7.5 7.5 0 0 1 0 10.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>`;
+      return z;
+    }
+
+    function traySvg(variant, suffix, px = 24) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" role="img" aria-label="ZMouseShow ${esc(variant)} tray icon">${trayShape(variant, suffix, px)}</svg>`;
+    }
+
+    function currentSvg(suffix, px = 256) {
+      return state.mode === "app" ? appSvg(state.variant, suffix, px) : traySvg(state.variant, suffix, px);
+    }
+
+    function save() {
+      localStorage.setItem("zmouse-icon-lab", JSON.stringify(state));
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    function renderCards() {
+      const grid = document.getElementById("candidateGrid");
+      grid.innerHTML = variants.map((variant, index) => `
+        <button type="button" class="candidate-card" data-variant="${variant.id}" aria-pressed="${variant.id === state.variant}">
+          ${variant.recommended ? `<span class="recommended">首选建议</span>` : ""}
+          <div class="candidate-visual">
+            <div class="app-stage">${appSvg(variant.id, `card-${index}`, 128)}</div>
+            <div class="tray-stage">
+              <div class="tray-light">${traySvg(variant.id, `card-light-${index}`, 24)}</div>
+              <div class="tray-dark">${traySvg(variant.id, `card-dark-${index}`, 24)}</div>
+            </div>
+          </div>
+          <div class="candidate-name"><strong>${variant.name}</strong><span class="candidate-code">${variant.code} / ${variant.en}</span></div>
+          <div class="candidate-desc">${variant.description}</div>
+          <div class="scores">${variant.scores.map(score => `<span class="score">${score}</span>`).join("")}</div>
+        </button>`).join("");
+
+      grid.querySelectorAll("[data-variant]").forEach(card => {
+        card.addEventListener("click", () => {
+          state.variant = card.dataset.variant;
+          save();
+          render();
+        });
+      });
+    }
+
+    function renderInspector() {
+      const selected = variants.find(v => v.id === state.variant);
+      document.getElementById("selectionTitle").textContent = `${selected.name} · ${selected.en}`;
+      document.querySelectorAll("[data-mode]").forEach(button => button.setAttribute("aria-pressed", button.dataset.mode === state.mode));
+
+      const hero = document.getElementById("heroPreview");
+      hero.className = `hero-preview ${state.mode}`;
+      document.getElementById("heroLight").innerHTML = currentSvg("hero-light", 256);
+      document.getElementById("heroDark").innerHTML = currentSvg("hero-dark", 256);
+
+      const sizes = state.mode === "app" ? [64, 48, 32, 24, 16] : [32, 24, 20, 16];
+      document.getElementById("sizeStrip").innerHTML = sizes.map((size, index) => {
+        const visualSize = Math.max(16, Math.min(size, 52));
+        return `<div class="size-cell" style="color:#17243a"><div style="width:52px;height:52px;display:grid;place-items:center">${currentSvg(`size-${index}`, size).replace("<svg ", `<svg style="width:${visualSize}px;height:${visualSize}px" `)}</div><span>${size} px</span></div>`;
+      }).join("");
+
+      document.getElementById("cornerValue").textContent = state.corner;
+      document.getElementById("scaleValue").textContent = `${state.iconScale}%`;
+      document.getElementById("strokeValue").textContent = (state.stroke / 10).toFixed(1);
+      document.getElementById("bgColor").value = state.bg;
+      document.getElementById("accentStart").value = state.accentStart;
+      document.getElementById("accentEnd").value = state.accentEnd;
+      document.getElementById("corner").value = state.corner;
+      document.getElementById("iconScale").value = state.iconScale;
+      document.getElementById("stroke").value = state.stroke;
+      document.getElementById("simplify").checked = state.simplify;
+      document.getElementById("downloadButton").textContent = `下载${state.mode === "app" ? "应用" : "托盘"} SVG`;
+    }
+
+    function render() {
+      document.getElementById("headerMark").innerHTML = appSvg("focus", "header", 64);
+      renderCards();
+      renderInspector();
+    }
+
+    document.querySelectorAll("[data-mode]").forEach(button => {
+      button.addEventListener("click", () => {
+        state.mode = button.dataset.mode;
+        save();
+        renderInspector();
+      });
+    });
+
+    const bindings = [
+      ["bgColor", "bg", value => value],
+      ["accentStart", "accentStart", value => value],
+      ["accentEnd", "accentEnd", value => value],
+      ["corner", "corner", value => Number(value)],
+      ["iconScale", "iconScale", value => Number(value)],
+      ["stroke", "stroke", value => Number(value)]
+    ];
+
+    bindings.forEach(([elementId, key, parse]) => {
+      document.getElementById(elementId).addEventListener("input", event => {
+        state[key] = parse(event.target.value);
+        save();
+        render();
+      });
+    });
+
+    document.getElementById("simplify").addEventListener("change", event => {
+      state.simplify = event.target.checked;
+      save();
+      render();
+    });
+
+    document.getElementById("resetButton").addEventListener("click", () => {
+      Object.assign(state, defaults);
+      save();
+      render();
+      showToast("已恢复初始方案");
+    });
+
+    document.getElementById("downloadButton").addEventListener("click", () => {
+      let svg = currentSvg("export", state.mode === "app" ? 256 : 24);
+      if (state.mode === "tray") svg = svg.replaceAll("currentColor", "#ffffff");
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `zmouse-${state.variant}-${state.mode}.svg`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      showToast("SVG 已下载");
+    });
+
+    document.getElementById("copyButton").addEventListener("click", async () => {
+      const selected = variants.find(v => v.id === state.variant);
+      const payload = {
+        product: "ZMouseShow", candidate: selected.code, name: selected.name,
+        variant: state.variant, background: state.bg, accent: [state.accentStart, state.accentEnd],
+        corner: state.corner, symbolScalePercent: state.iconScale,
+        locatorStroke: state.stroke / 10, simplifyAtOrBelow24px: state.simplify
+      };
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+        showToast("方案参数已复制");
+      } catch {
+        showToast("浏览器未允许剪贴板，请使用下载 SVG");
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>

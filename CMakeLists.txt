@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.4)
 
 project(
     ZMouseShow
-    VERSION 0.1.0
+    VERSION 0.4.2
     DESCRIPTION "Portable mouse locator for Windows"
     LANGUAGES CXX
 )
@@ -61,6 +61,8 @@ add_executable(ZMouseShow WIN32
     resources/ZMouseShow.rc
     resources/ZMouseShow.manifest
 )
+
+target_include_directories(ZMouseShow PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources")
 
 target_link_libraries(ZMouseShow
     PRIVATE
