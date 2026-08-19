@@ -77,6 +77,7 @@ target_link_libraries(ZMouseShow
         shell32
         shcore
         user32
+        wtsapi32
 )
 target_compile_definitions(ZMouseShow PRIVATE ZMOUSE_VERSION="${PROJECT_VERSION}")
 zmouse_apply_project_options(ZMouseShow)
@@ -168,9 +169,17 @@ if(BUILD_TESTING)
             d3d11
             dcomp
             dxgi
+            magnification
             psapi
             shcore
             user32
     )
     zmouse_apply_project_options(zmouse_magnifier_benchmark)
+
+    add_executable(zmouse_perf_experiment
+        benchmarks/perf_experiment.cpp
+        src/platform/spotlight_region.cpp
+    )
+    target_link_libraries(zmouse_perf_experiment PRIVATE ZMouseShow::Core gdi32 user32)
+    zmouse_apply_project_options(zmouse_perf_experiment)
 endif()

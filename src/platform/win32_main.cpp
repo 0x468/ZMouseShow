@@ -12,14 +12,15 @@
 #include "zmouse/diagnostics/report.hpp"
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/hotkey_detector.hpp"
+#include "zmouse/input/key_state_cache.hpp"
 #include "zmouse/input/overlay_input_rules.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/locator_animation.hpp"
 #include "zmouse/platform/desktop_duplication_capture.hpp"
 #include "zmouse/platform/global_hotkey_registration.hpp"
 #include "zmouse/platform/magnifier_window.hpp"
+#include "zmouse/platform/string_util.hpp"
 #include <array>
-#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -31,6 +32,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <wtsapi32.h>
 
 namespace
 {
@@ -68,33 +70,7 @@ struct MonitorCollection
     bool success{true};
 };
 
-[[nodiscard]] std::string wide_to_utf8(const std::wstring_view value) noexcept
-{
-    try
-    {
-        if (value.empty())
-        {
-            return {};
-        }
-        const int required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
-                                                 static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-        if (required <= 0)
-        {
-            return {};
-        }
-        std::string result(static_cast<std::size_t>(required), '\0');
-        if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
-                                result.data(), required, nullptr, nullptr) != required)
-        {
-            return {};
-        }
-        return result;
-    }
-    catch (...)
-    {
-        return {};
-    }
-}
+using zmouse::platform::wide_to_utf8;
 
 [[nodiscard]] std::string current_utc_time()
 {
@@ -246,6 +222,8 @@ class Application final
             }
             return 1;
         }
+        synchronize_input_state();
+        session_notifications_registered_ = WTSRegisterSessionNotification(window_, NOTIFY_FOR_THIS_SESSION) != FALSE;
 
         const bool hotkey_available = replace_hotkey_registration(settings_.hotkey);
         if (!add_tray_icon())
@@ -351,13 +329,13 @@ class Application final
         devices[0] = {
             .usUsagePage = HID_USAGE_PAGE_GENERIC,
             .usUsage = HID_USAGE_GENERIC_KEYBOARD,
-            .dwFlags = RIDEV_INPUTSINK,
+            .dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY,
             .hwndTarget = window_,
         };
         devices[1] = {
             .usUsagePage = HID_USAGE_PAGE_GENERIC,
             .usUsage = HID_USAGE_GENERIC_MOUSE,
-            .dwFlags = RIDEV_INPUTSINK,
+            .dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY,
             .hwndTarget = window_,
         };
 
@@ -422,51 +400,131 @@ class Application final
         };
     }
 
-    void synchronize_input_state() noexcept
+    [[nodiscard]] static std::uint8_t physical_mouse_buttons() noexcept
     {
-        const auto key_is_down = [](const int virtual_key) noexcept
+        const auto down = [](const int virtual_key) noexcept
         { return (GetAsyncKeyState(virtual_key) & static_cast<SHORT>(0x8000)) != 0; };
-
-        key_down_.reset();
-        for (std::size_t virtual_key = 1; virtual_key < 0xFFU; ++virtual_key)
+        std::uint8_t buttons = 0;
+        if (down(VK_LBUTTON))
         {
-            if (virtual_key == VK_LBUTTON || virtual_key == VK_RBUTTON || virtual_key == VK_MBUTTON ||
-                virtual_key == VK_XBUTTON1 || virtual_key == VK_XBUTTON2 || virtual_key == VK_SHIFT ||
-                virtual_key == VK_LSHIFT || virtual_key == VK_RSHIFT || virtual_key == VK_CONTROL ||
-                virtual_key == VK_LCONTROL || virtual_key == VK_RCONTROL || virtual_key == VK_MENU ||
-                virtual_key == VK_LMENU || virtual_key == VK_RMENU)
+            buttons = static_cast<std::uint8_t>(buttons | mouse_left);
+        }
+        if (down(VK_RBUTTON))
+        {
+            buttons = static_cast<std::uint8_t>(buttons | mouse_right);
+        }
+        if (down(VK_MBUTTON))
+        {
+            buttons = static_cast<std::uint8_t>(buttons | mouse_middle);
+        }
+        if (down(VK_XBUTTON1))
+        {
+            buttons = static_cast<std::uint8_t>(buttons | mouse_x1);
+        }
+        if (down(VK_XBUTTON2))
+        {
+            buttons = static_cast<std::uint8_t>(buttons | mouse_x2);
+        }
+        return buttons;
+    }
+
+    void reconcile_mouse_button_state(const bool force = false) noexcept
+    {
+        if (mouse_buttons_ == 0)
+        {
+            return;
+        }
+        const ULONGLONG now = GetTickCount64();
+        if (!force && now < next_mouse_reconcile_at_)
+        {
+            return;
+        }
+        next_mouse_reconcile_at_ = now + 100;
+        const auto physical = physical_mouse_buttons();
+        if (physical == mouse_buttons_)
+        {
+            return;
+        }
+        mouse_buttons_ = physical;
+        double_ctrl_detector_.on_mouse_button_event();
+        shake_detector_.on_mouse_buttons_changed(mouse_buttons_ != 0);
+    }
+
+    [[nodiscard]] static bool physical_key_is_down(const std::size_t key_id) noexcept
+    {
+        UINT virtual_key = static_cast<UINT>(key_id < 256U ? key_id : key_id - 256U);
+        if (key_id == VK_CONTROL)
+        {
+            virtual_key = VK_LCONTROL;
+        }
+        else if (key_id == VK_CONTROL + 256U)
+        {
+            virtual_key = VK_RCONTROL;
+        }
+        else if (key_id == VK_MENU)
+        {
+            virtual_key = VK_LMENU;
+        }
+        else if (key_id == VK_MENU + 256U)
+        {
+            virtual_key = VK_RMENU;
+        }
+        return (GetAsyncKeyState(static_cast<int>(virtual_key)) & static_cast<SHORT>(0x8000)) != 0;
+    }
+
+    void reconcile_keyboard_state(const std::size_t excluded_key = zmouse::input::KeyStateCache::capacity,
+                                  const bool force = false) noexcept
+    {
+        if (key_state_.non_modifier_count() == 0 && key_state_.modifier_count() == 0)
+        {
+            return;
+        }
+        const ULONGLONG now = GetTickCount64();
+        if (!force && now < next_keyboard_reconcile_at_)
+        {
+            return;
+        }
+        next_keyboard_reconcile_at_ = now + 100;
+        for (std::size_t key_id = 1; key_id < zmouse::input::KeyStateCache::capacity; ++key_id)
+        {
+            if (key_id == excluded_key || !key_state_.is_down(key_id) || physical_key_is_down(key_id))
             {
                 continue;
             }
-            key_down_.set(virtual_key, key_is_down(static_cast<int>(virtual_key)));
+            const UINT virtual_key = static_cast<UINT>(key_id < 256U ? key_id : key_id - 256U);
+            static_cast<void>(key_state_.update(key_id, false, is_modifier_virtual_key(virtual_key)));
         }
-        key_down_.set(VK_SHIFT, key_is_down(VK_SHIFT));
-        key_down_.set(VK_CONTROL, key_is_down(VK_LCONTROL));
-        key_down_.set(VK_CONTROL + 256U, key_is_down(VK_RCONTROL));
-        key_down_.set(VK_MENU, key_is_down(VK_LMENU));
-        key_down_.set(VK_MENU + 256U, key_is_down(VK_RMENU));
+    }
 
-        mouse_buttons_ = 0;
-        if (key_is_down(VK_LBUTTON))
+    void synchronize_input_state() noexcept
+    {
+        ++input_resync_count_;
+        const auto key_is_down = [](const int virtual_key) noexcept
+        { return (GetAsyncKeyState(virtual_key) & static_cast<SHORT>(0x8000)) != 0; };
+
+        key_state_.reset();
+        for (std::size_t virtual_key = 1; virtual_key < 0xFFU; ++virtual_key)
         {
-            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_left);
+            if (virtual_key == VK_LBUTTON || virtual_key == VK_RBUTTON || virtual_key == VK_MBUTTON ||
+                virtual_key == VK_XBUTTON1 || virtual_key == VK_XBUTTON2 ||
+                is_modifier_virtual_key(static_cast<UINT>(virtual_key)))
+            {
+                continue;
+            }
+            static_cast<void>(key_state_.update(virtual_key, key_is_down(static_cast<int>(virtual_key)), false));
         }
-        if (key_is_down(VK_RBUTTON))
-        {
-            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_right);
-        }
-        if (key_is_down(VK_MBUTTON))
-        {
-            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_middle);
-        }
-        if (key_is_down(VK_XBUTTON1))
-        {
-            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_x1);
-        }
-        if (key_is_down(VK_XBUTTON2))
-        {
-            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ | mouse_x2);
-        }
+        // RAWKEYBOARD reports Shift as VK_SHIFT and distinguishes right Ctrl/Alt
+        // through RI_KEY_E0. Mirror those normalized identifiers here so a
+        // resynchronization cannot count the same physical modifier twice.
+        static_cast<void>(key_state_.update(VK_SHIFT, key_is_down(VK_SHIFT), true));
+        static_cast<void>(key_state_.update(VK_CONTROL, key_is_down(VK_LCONTROL), true));
+        static_cast<void>(key_state_.update(VK_CONTROL + 256U, key_is_down(VK_RCONTROL), true));
+        static_cast<void>(key_state_.update(VK_MENU, key_is_down(VK_LMENU), true));
+        static_cast<void>(key_state_.update(VK_MENU + 256U, key_is_down(VK_RMENU), true));
+        static_cast<void>(key_state_.update(VK_LWIN, key_is_down(VK_LWIN), true));
+        static_cast<void>(key_state_.update(VK_RWIN, key_is_down(VK_RWIN), true));
+
+        mouse_buttons_ = physical_mouse_buttons();
 
         double_ctrl_detector_.reset();
         shake_detector_.reset();
@@ -696,6 +754,10 @@ class Application final
                 .remote_session = GetSystemMetrics(SM_REMOTESESSION) != 0,
                 .custom_hotkey_registered = hotkey_registration_.active(),
                 .startup_registered = zmouse::platform::startup_registration_enabled(),
+                .cached_mouse_button_down = mouse_buttons_ != 0,
+                .cached_non_modifier_keys = key_state_.non_modifier_count(),
+                .cached_modifier_keys = key_state_.modifier_count(),
+                .input_resync_count = input_resync_count_,
                 .virtual_desktop = {virtual_left, virtual_top, virtual_left + GetSystemMetrics(SM_CXVIRTUALSCREEN),
                                     virtual_top + GetSystemMetrics(SM_CYVIRTUALSCREEN)},
                 .monitors = std::move(collection.monitors),
@@ -971,6 +1033,7 @@ class Application final
             return;
         }
 
+        const bool had_pending = cursor_update_pending_;
         update_overlay_cursor();
         if (!overlay_manager_.visible())
         {
@@ -978,21 +1041,29 @@ class Application final
         }
 
         const ULONGLONG now = GetTickCount64();
-        const auto frame = locator_animation_.frame(now);
-        if (!frame.surface_visible)
+        const auto phase = locator_animation_.phase();
+        const bool steady_state = phase == zmouse::overlay::AnimationPhase::visible;
+
+        // In steady state with no cursor movement, all frame parameters are
+        // already at their final values — skip the entire render pipeline.
+        if (!steady_state || had_pending)
         {
-            hide_overlay_immediately();
-            return;
-        }
-        overlay_manager_.set_animation_frame(frame.dim_progress, frame.focus_opacity, frame.ripple_scale,
-                                             frame.ripple_opacity);
-        if (!overlay_manager_.visible())
-        {
-            hide_overlay_immediately();
-            return;
+            const auto frame = locator_animation_.frame(now);
+            if (!frame.surface_visible)
+            {
+                hide_overlay_immediately();
+                return;
+            }
+            overlay_manager_.set_animation_frame(frame.dim_progress, frame.focus_opacity, frame.ripple_scale,
+                                                 frame.ripple_opacity);
+            if (!overlay_manager_.visible())
+            {
+                hide_overlay_immediately();
+                return;
+            }
         }
 
-        if (locator_animation_.phase() == zmouse::overlay::AnimationPhase::visible && auto_timeout_enabled_ &&
+        if (steady_state && auto_timeout_enabled_ &&
             (now - last_cursor_move_at_ >= overlay_idle_timeout_ms_ ||
              now - overlay_started_at_ >= overlay_max_duration_ms_))
         {
@@ -1033,7 +1104,16 @@ class Application final
         }
         if (magnifier_capture_ == nullptr)
         {
-            magnifier_capture_ = std::make_unique<zmouse::platform::DesktopDuplicationCapture>();
+            try
+            {
+                magnifier_capture_ = std::make_unique<zmouse::platform::DesktopDuplicationCapture>();
+            }
+            catch (...)
+            {
+                magnifier_window_.hide();
+                magnifier_retry_after_ = now + 1'000;
+                return;
+            }
         }
         if (magnifier_monitor_ != nullptr && magnifier_monitor_ != monitor)
         {
@@ -1067,20 +1147,17 @@ class Application final
         UINT dpi_x = 96;
         UINT dpi_y = 96;
         static_cast<void>(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y));
-        if (!magnifier_window_.render(*magnifier_capture_, {position.x, position.y}, dpi_x))
-        {
-            const auto failure = magnifier_capture_->diagnostics().last_failure;
-            if (failure != zmouse::capture::FailureCategory::timeout &&
-                failure != zmouse::capture::FailureCategory::none)
-            {
-                magnifier_capture_->stop();
-                magnifier_monitor_ = nullptr;
-                magnifier_retry_after_ = now + 1'000;
-            }
-        }
-        else
+        const auto render_result = magnifier_window_.render(*magnifier_capture_, {position.x, position.y}, dpi_x);
+        if (render_result == zmouse::platform::MagnifierRenderResult::presented)
         {
             magnifier_retry_after_ = 0;
+        }
+        else if (render_result != zmouse::platform::MagnifierRenderResult::no_frame)
+        {
+            magnifier_capture_->stop();
+            magnifier_monitor_ = nullptr;
+            magnifier_window_.hide();
+            magnifier_retry_after_ = now + 1'000;
         }
     }
 
@@ -1097,6 +1174,33 @@ class Application final
         {
         case WM_INPUT:
             handle_raw_input(reinterpret_cast<HRAWINPUT>(l_param));
+            return 0;
+
+        case WM_INPUT_DEVICE_CHANGE:
+            synchronize_input_state();
+            return 0;
+
+        case WM_ACTIVATEAPP:
+            if (w_param != FALSE)
+            {
+                synchronize_input_state();
+            }
+            return 0;
+
+        case WM_POWERBROADCAST:
+            if (w_param == PBT_APMSUSPEND)
+            {
+                hide_overlay_immediately();
+            }
+            else if (w_param == PBT_APMRESUMEAUTOMATIC || w_param == PBT_APMRESUMESUSPEND)
+            {
+                synchronize_input_state();
+            }
+            return TRUE;
+
+        case WM_WTSSESSION_CHANGE:
+            hide_overlay_immediately();
+            synchronize_input_state();
             return 0;
 
         case WM_HOTKEY:
@@ -1168,6 +1272,7 @@ class Application final
 
         case WM_DISPLAYCHANGE:
             stop_magnifier_capture();
+            synchronize_input_state();
             if (!overlay_manager_.rebuild())
             {
                 hide_overlay_immediately();
@@ -1180,6 +1285,11 @@ class Application final
 
         case WM_DESTROY:
             hide_overlay_immediately();
+            if (session_notifications_registered_)
+            {
+                static_cast<void>(WTSUnRegisterSessionNotification(window_));
+                session_notifications_registered_ = false;
+            }
             hotkey_registration_.reset();
             remove_tray_icon();
             PostQuitMessage(0);
@@ -1221,14 +1331,17 @@ class Application final
 
         const bool extended = (keyboard.Flags & RI_KEY_E0) != 0;
         const std::size_t key_id = static_cast<std::size_t>(keyboard.VKey) + (extended ? 256U : 0U);
-        if (key_id >= key_down_.size())
+        if (key_id >= zmouse::input::KeyStateCache::capacity)
         {
             return;
         }
 
         const bool pressed = (keyboard.Flags & RI_KEY_BREAK) == 0;
-        const bool repeated = pressed && key_down_[key_id];
-        key_down_[key_id] = pressed;
+        const bool current_is_modifier = is_modifier_virtual_key(keyboard.VKey);
+        const auto key_update = key_state_.update(key_id, pressed, current_is_modifier);
+        const bool repeated = key_update.repeated;
+        reconcile_mouse_button_state(true);
+        reconcile_keyboard_state(key_id, true);
 
         const bool left_control = keyboard.VKey == VK_LCONTROL || (keyboard.VKey == VK_CONTROL && !extended);
         const bool right_control = keyboard.VKey == VK_RCONTROL || (keyboard.VKey == VK_CONTROL && extended);
@@ -1239,18 +1352,8 @@ class Application final
             dismiss_overlay();
         }
 
-        bool any_other_key_down = false;
-        bool any_other_non_modifier_key_down = false;
-        for (std::size_t index = 0; index < key_down_.size(); ++index)
-        {
-            if (index != key_id && key_down_[index])
-            {
-                any_other_key_down = true;
-                const auto virtual_key = static_cast<UINT>(index % 256U);
-                any_other_non_modifier_key_down =
-                    any_other_non_modifier_key_down || !is_modifier_virtual_key(virtual_key);
-            }
-        }
+        const bool any_other_key_down = key_state_.any_other_key(key_id, current_is_modifier);
+        const bool any_other_non_modifier_key_down = key_state_.any_other_non_modifier(key_id, current_is_modifier);
 
         if (!zmouse::input::triggers_armed(input_state()))
         {
@@ -1270,7 +1373,7 @@ class Application final
                 .shift_down =
                     is_virtual_key_down(VK_SHIFT) || is_virtual_key_down(VK_LSHIFT) || is_virtual_key_down(VK_RSHIFT),
                 .windows_down = is_virtual_key_down(VK_LWIN) || is_virtual_key_down(VK_RWIN),
-                .other_key_down = any_other_non_modifier_key_down,
+                .other_key_down = any_other_non_modifier_key_down || mouse_buttons_ != 0,
             };
             if (hotkey_detector_.process(hotkey_event))
             {
@@ -1296,11 +1399,12 @@ class Application final
 
     [[nodiscard]] bool is_virtual_key_down(const UINT virtual_key) const noexcept
     {
-        return key_down_[virtual_key] || key_down_[virtual_key + 256U];
+        return key_state_.is_down(virtual_key) || key_state_.is_down(virtual_key + 256U);
     }
 
     [[nodiscard]] bool registered_hotkey_chord_is_clean() noexcept
     {
+        reconcile_mouse_button_state(true);
         const auto key_is_down = [](const int virtual_key) noexcept
         { return (GetAsyncKeyState(virtual_key) & static_cast<SHORT>(0x8000)) != 0; };
 
@@ -1376,6 +1480,11 @@ class Application final
             double_ctrl_detector_.on_mouse_button_event();
             shake_detector_.on_mouse_buttons_changed(mouse_buttons_ != 0);
         }
+        else
+        {
+            reconcile_mouse_button_state();
+            reconcile_keyboard_state();
+        }
 
         if (overlay_manager_.visible() && (mouse.lLastX != 0 || mouse.lLastY != 0))
         {
@@ -1425,11 +1534,15 @@ class Application final
     bool auto_timeout_enabled_{};
     bool tray_menu_open_{};
     bool settings_dialog_open_{};
-    std::bitset<512> key_down_{};
+    zmouse::input::KeyStateCache key_state_{};
     bool activation_pending_{};
+    bool session_notifications_registered_{};
     HANDLE animation_timer_{};
     bool animation_timer_running_{};
     std::uint8_t mouse_buttons_{};
+    ULONGLONG next_mouse_reconcile_at_{};
+    ULONGLONG next_keyboard_reconcile_at_{};
+    std::uint64_t input_resync_count_{};
     ULONGLONG overlay_idle_timeout_ms_{1'200};
     ULONGLONG overlay_max_duration_ms_{5'000};
     ULONGLONG overlay_started_at_{};

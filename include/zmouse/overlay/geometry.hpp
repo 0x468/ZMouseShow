@@ -45,6 +45,8 @@ struct Rect
 
 [[nodiscard]] constexpr std::int32_t dip_to_pixels(const std::int32_t dip, const std::uint32_t dpi) noexcept
 {
-    return static_cast<std::int32_t>((static_cast<std::int64_t>(dip) * dpi + 48) / 96);
+    const auto safe_dpi = dpi < 1 ? std::uint32_t{1} : dpi;
+    const auto raw = static_cast<std::int32_t>((static_cast<std::int64_t>(dip) * safe_dpi + 48) / 96);
+    return raw < 1 ? 1 : raw;
 }
 } // namespace zmouse::overlay

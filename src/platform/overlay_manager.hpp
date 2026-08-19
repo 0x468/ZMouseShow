@@ -38,6 +38,10 @@ class OverlayManager final
         RECT bounds{};
         HWND window{};
         UINT dpi{96};
+        HRGN cached_hole{};          // pre-allocated hole region, reused via OffsetRgn
+        overlay::Point cached_hole_at{-1, -1}; // position of cached_hole
+        overlay::SpotlightShape cached_hole_shape{};
+        std::int32_t cached_hole_radius{};
     };
 
     static LRESULT CALLBACK overlay_window_proc(HWND window, UINT message, WPARAM w_param, LPARAM l_param) noexcept;
@@ -67,10 +71,25 @@ class OverlayManager final
     ATOM ring_class_{};
     std::vector<MonitorOverlay> overlays_;
     HWND ring_window_{};
-    HDC ring_dc_{};
-    HBITMAP ring_bitmap_{};
-    HGDIOBJ ring_old_bitmap_{};
-    std::uint32_t* ring_pixels_{};
+    struct DibSurface
+    {
+        HDC dc{};
+        HBITMAP bitmap{};
+        HGDIOBJ old_bitmap{};
+        std::uint32_t* pixels{};
+        SIZE size{};
+
+        DibSurface() = default;
+        ~DibSurface() { destroy(); }
+        DibSurface(const DibSurface&) = delete;
+        DibSurface& operator=(const DibSurface&) = delete;
+        DibSurface(DibSurface&& other) noexcept;
+        DibSurface& operator=(DibSurface&& other) noexcept;
+
+        [[nodiscard]] bool create(SIZE s) noexcept;
+        void destroy() noexcept;
+    };
+    DibSurface ring_surface_;
     SIZE ring_bitmap_capacity_{};
     SIZE ring_size_{};
     std::int32_t ring_base_radius_px_{};
@@ -81,10 +100,7 @@ class OverlayManager final
     std::uint8_t painted_crosshair_alpha_{};
     bool ring_bitmap_dirty_{};
     HWND cursor_window_{};
-    HDC cursor_dc_{};
-    HBITMAP cursor_bitmap_{};
-    HGDIOBJ cursor_old_bitmap_{};
-    std::uint32_t* cursor_pixels_{};
+    DibSurface cursor_surface_;
     SIZE cursor_size_{};
     POINT cursor_hotspot_{};
     HCURSOR rendered_cursor_{};
@@ -102,6 +118,7 @@ class OverlayManager final
     double ripple_scale_{1.0};
     double ripple_opacity_{};
     overlay::Point last_cursor_{};
+    POINT ring_window_pos_{-1, -1}; // cached ring window position
     bool visible_{};
 };
 } // namespace zmouse::platform

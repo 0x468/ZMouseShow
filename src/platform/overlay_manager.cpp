@@ -29,13 +29,44 @@ constexpr std::int32_t maximum_animated_ring_radius_px = 768;
     return (std::clamp)(requested, base_radius_px, (std::max)(base_radius_px, maximum_animated_ring_radius_px));
 }
 
-[[nodiscard]] bool create_dib_surface(const SIZE size, HDC& dc, HBITMAP& bitmap, HGDIOBJ& old_bitmap,
-                                      std::uint32_t*& pixels) noexcept
+} // namespace
+
+OverlayManager::DibSurface::DibSurface(DibSurface&& other) noexcept
+    : dc(other.dc), bitmap(other.bitmap), old_bitmap(other.old_bitmap), pixels(other.pixels), size(other.size)
 {
+    other.dc = nullptr;
+    other.bitmap = nullptr;
+    other.old_bitmap = nullptr;
+    other.pixels = nullptr;
+    other.size = {};
+}
+
+OverlayManager::DibSurface& OverlayManager::DibSurface::operator=(DibSurface&& other) noexcept
+{
+    if (this != &other)
+    {
+        destroy();
+        dc = other.dc;
+        bitmap = other.bitmap;
+        old_bitmap = other.old_bitmap;
+        pixels = other.pixels;
+        size = other.size;
+        other.dc = nullptr;
+        other.bitmap = nullptr;
+        other.old_bitmap = nullptr;
+        other.pixels = nullptr;
+        other.size = {};
+    }
+    return *this;
+}
+
+bool OverlayManager::DibSurface::create(const SIZE s) noexcept
+{
+    destroy();
     BITMAPINFO bitmap_info{};
     bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bitmap_info.bmiHeader.biWidth = size.cx;
-    bitmap_info.bmiHeader.biHeight = -size.cy;
+    bitmap_info.bmiHeader.biWidth = s.cx;
+    bitmap_info.bmiHeader.biHeight = -s.cy;
     bitmap_info.bmiHeader.biPlanes = 1;
     bitmap_info.bmiHeader.biBitCount = 32;
     bitmap_info.bmiHeader.biCompression = BI_RGB;
@@ -45,18 +76,21 @@ constexpr std::int32_t maximum_animated_ring_radius_px = 768;
     dc = CreateCompatibleDC(nullptr);
     if (bitmap == nullptr || dc == nullptr || pixel_memory == nullptr)
     {
+        destroy();
         return false;
     }
     old_bitmap = SelectObject(dc, bitmap);
     if (old_bitmap == nullptr || old_bitmap == HGDI_ERROR)
     {
+        destroy();
         return false;
     }
     pixels = static_cast<std::uint32_t*>(pixel_memory);
+    size = s;
     return true;
 }
 
-void destroy_dib_surface(HDC& dc, HBITMAP& bitmap, HGDIOBJ& old_bitmap, std::uint32_t*& pixels) noexcept
+void OverlayManager::DibSurface::destroy() noexcept
 {
     if (dc != nullptr && old_bitmap != nullptr && old_bitmap != HGDI_ERROR)
     {
@@ -74,8 +108,8 @@ void destroy_dib_surface(HDC& dc, HBITMAP& bitmap, HGDIOBJ& old_bitmap, std::uin
     bitmap = nullptr;
     old_bitmap = nullptr;
     pixels = nullptr;
+    size = {};
 }
-} // namespace
 
 OverlayManager::~OverlayManager()
 {
@@ -255,6 +289,7 @@ void OverlayManager::hide() noexcept
         ShowWindow(overlay.window, SW_HIDE);
     }
     visible_ = false;
+    ring_window_pos_ = {-1, -1};
 }
 
 bool OverlayManager::visible() const noexcept
@@ -403,23 +438,43 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
     const auto monitor_width = overlay::width(monitor_bounds);
     const auto monitor_height = overlay::height(monitor_bounds);
 
-    HRGN full_region = CreateRectRgn(0, 0, monitor_width, monitor_height);
-    HRGN hole_region = create_spotlight_region(hole, spotlight_shape_);
-    if (full_region == nullptr || hole_region == nullptr)
+    // Create or reuse the hole region at the origin, then offset to target position
+    if (monitor_overlay.cached_hole == nullptr || monitor_overlay.cached_hole_shape != spotlight_shape_ ||
+        monitor_overlay.cached_hole_radius != radius_px)
     {
-        if (full_region != nullptr)
+        if (monitor_overlay.cached_hole != nullptr)
         {
-            DeleteObject(full_region);
+            DeleteObject(monitor_overlay.cached_hole);
         }
-        if (hole_region != nullptr)
-        {
-            DeleteObject(hole_region);
-        }
+        const overlay::Rect origin_hole{0, 0, radius_px * 2, radius_px * 2};
+        monitor_overlay.cached_hole = create_spotlight_region(origin_hole, spotlight_shape_);
+        monitor_overlay.cached_hole_shape = spotlight_shape_;
+        monitor_overlay.cached_hole_radius = radius_px;
+        monitor_overlay.cached_hole_at = {0, 0};
+    }
+    if (monitor_overlay.cached_hole == nullptr)
+    {
         return false;
     }
 
-    const int combine_result = CombineRgn(full_region, full_region, hole_region, RGN_DIFF);
-    DeleteObject(hole_region);
+    // Offset cached hole to the target position
+    const overlay::Point target{hole.left, hole.top};
+    if (!(target == monitor_overlay.cached_hole_at))
+    {
+        const auto dx = target.x - monitor_overlay.cached_hole_at.x;
+        const auto dy = target.y - monitor_overlay.cached_hole_at.y;
+        OffsetRgn(monitor_overlay.cached_hole, dx, dy);
+        monitor_overlay.cached_hole_at = target;
+    }
+
+    // SetWindowRgn takes ownership — must create a fresh full_region each call
+    HRGN full_region = CreateRectRgn(0, 0, monitor_width, monitor_height);
+    if (full_region == nullptr)
+    {
+        return false;
+    }
+
+    const int combine_result = CombineRgn(full_region, full_region, monitor_overlay.cached_hole, RGN_DIFF);
     if (combine_result == ERROR)
     {
         DeleteObject(full_region);
@@ -462,39 +517,18 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const
     const SIZE required_capacity{.cx = capacity_extent * 2, .cy = capacity_extent * 2};
     const auto active_extent = ripple_alpha > 0 ? capacity_extent : base_radius_px + margin;
     const SIZE requested_size{.cx = active_extent * 2, .cy = active_extent * 2};
-    if (ring_bitmap_ == nullptr || ring_base_radius_px_ != base_radius_px ||
+    if (ring_surface_.bitmap == nullptr || ring_base_radius_px_ != base_radius_px ||
         ring_bitmap_capacity_.cx < required_capacity.cx || ring_bitmap_capacity_.cy < required_capacity.cy)
     {
         destroy_ring_bitmap();
 
-        BITMAPINFO bitmap_info{};
-        bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bitmap_info.bmiHeader.biWidth = required_capacity.cx;
-        bitmap_info.bmiHeader.biHeight = -required_capacity.cy;
-        bitmap_info.bmiHeader.biPlanes = 1;
-        bitmap_info.bmiHeader.biBitCount = 32;
-        bitmap_info.bmiHeader.biCompression = BI_RGB;
-
-        void* pixel_memory = nullptr;
-        ring_bitmap_ = CreateDIBSection(nullptr, &bitmap_info, DIB_RGB_COLORS, &pixel_memory, nullptr, 0);
-        ring_dc_ = CreateCompatibleDC(nullptr);
-        if (ring_bitmap_ == nullptr || ring_dc_ == nullptr || pixel_memory == nullptr)
+        if (!ring_surface_.create(required_capacity))
         {
-            destroy_ring_bitmap();
             return false;
         }
-        const HGDIOBJ old_bitmap = SelectObject(ring_dc_, ring_bitmap_);
-        if (old_bitmap == nullptr || old_bitmap == HGDI_ERROR)
-        {
-            destroy_ring_bitmap();
-            return false;
-        }
-        ring_old_bitmap_ = old_bitmap;
-
-        ring_pixels_ = static_cast<std::uint32_t*>(pixel_memory);
         ring_bitmap_capacity_ = required_capacity;
         ring_base_radius_px_ = base_radius_px;
-        std::fill_n(ring_pixels_,
+        std::fill_n(ring_surface_.pixels,
                     static_cast<std::size_t>(required_capacity.cx) * static_cast<std::size_t>(required_capacity.cy),
                     0U);
     }
@@ -508,7 +542,7 @@ bool OverlayManager::ensure_ring_bitmap(const std::int32_t base_radius_px, const
     }
 
     const zmouse::render::PixelSurface surface{
-        .pixels = std::span(ring_pixels_, static_cast<std::size_t>(ring_bitmap_capacity_.cx) *
+        .pixels = std::span(ring_surface_.pixels, static_cast<std::size_t>(ring_bitmap_capacity_.cx) *
                                               static_cast<std::size_t>(ring_bitmap_capacity_.cy)),
         .width = ring_bitmap_capacity_.cx,
         .height = ring_bitmap_capacity_.cy,
@@ -580,7 +614,7 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) noexcept
         ShowWindow(ring_window_, SW_HIDE);
         return true;
     }
-    if (ring_dc_ == nullptr)
+    if (ring_surface_.dc == nullptr)
     {
         return false;
     }
@@ -596,18 +630,33 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) noexcept
             .SourceConstantAlpha = 255,
             .AlphaFormat = AC_SRC_ALPHA,
         };
-        if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_dc_, &source, 0, &blend, ULW_ALPHA) ==
-            FALSE)
+        if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_surface_.dc, &source, 0, &blend,
+                                ULW_ALPHA) == FALSE)
+        {
+            return false;
+        }
+        if (SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE)
         {
             return false;
         }
         ring_bitmap_dirty_ = false;
-        return SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+        ring_window_pos_ = destination;
+        return true;
     }
 
-    return SetWindowPos(ring_window_, HWND_TOPMOST, destination.x, destination.y, 0, 0,
-                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+    // Skip SetWindowPos if position hasn't changed
+    if (destination.x == ring_window_pos_.x && destination.y == ring_window_pos_.y)
+    {
+        return true;
+    }
+    if (SetWindowPos(ring_window_, HWND_TOPMOST, destination.x, destination.y, 0, 0,
+                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE)
+    {
+        return false;
+    }
+    ring_window_pos_ = destination;
+    return true;
 }
 
 bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)
@@ -621,7 +670,7 @@ bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)
     }
 
     const auto scale_percent = (std::clamp)(effects_.cursor_scale_percent, 125U, 400U);
-    if (cursor_bitmap_ != nullptr && rendered_cursor_ == cursor_info.hCursor && rendered_cursor_dpi_ == dpi &&
+    if (cursor_surface_.bitmap != nullptr && rendered_cursor_ == cursor_info.hCursor && rendered_cursor_dpi_ == dpi &&
         rendered_cursor_scale_percent_ == scale_percent)
     {
         cursor_drawable_ = true;
@@ -669,41 +718,30 @@ bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)
     };
 
     destroy_cursor_bitmap();
-    if (!create_dib_surface(target_size, cursor_dc_, cursor_bitmap_, cursor_old_bitmap_, cursor_pixels_))
+    if (!cursor_surface_.create(target_size))
     {
         destroy_cursor_bitmap();
         return false;
     }
 
-    HDC black_dc = nullptr;
-    HBITMAP black_bitmap = nullptr;
-    HGDIOBJ black_old_bitmap = nullptr;
-    std::uint32_t* black_pixels = nullptr;
-    HDC white_dc = nullptr;
-    HBITMAP white_bitmap = nullptr;
-    HGDIOBJ white_old_bitmap = nullptr;
-    std::uint32_t* white_pixels = nullptr;
-    if (!create_dib_surface(target_size, black_dc, black_bitmap, black_old_bitmap, black_pixels) ||
-        !create_dib_surface(target_size, white_dc, white_bitmap, white_old_bitmap, white_pixels))
+    DibSurface black_surface;
+    DibSurface white_surface;
+    if (!black_surface.create(target_size) || !white_surface.create(target_size))
     {
-        destroy_dib_surface(black_dc, black_bitmap, black_old_bitmap, black_pixels);
-        destroy_dib_surface(white_dc, white_bitmap, white_old_bitmap, white_pixels);
         destroy_cursor_bitmap();
         return false;
     }
 
     const auto pixel_count = static_cast<std::size_t>(target_size.cx) * static_cast<std::size_t>(target_size.cy);
-    std::fill_n(black_pixels, pixel_count, 0x00000000U);
-    std::fill_n(white_pixels, pixel_count, 0x00FFFFFFU);
+    std::fill_n(black_surface.pixels, pixel_count, 0x00000000U);
+    std::fill_n(white_surface.pixels, pixel_count, 0x00FFFFFFU);
     const bool drawn =
-        DrawIconEx(black_dc, 0, 0, cursor_info.hCursor, target_size.cx, target_size.cy, 0, nullptr, DI_NORMAL) !=
+        DrawIconEx(black_surface.dc, 0, 0, cursor_info.hCursor, target_size.cx, target_size.cy, 0, nullptr, DI_NORMAL) !=
             FALSE &&
-        DrawIconEx(white_dc, 0, 0, cursor_info.hCursor, target_size.cx, target_size.cy, 0, nullptr, DI_NORMAL) != FALSE;
-    const bool composed = drawn && zmouse::render::compose_cursor_images(std::span(black_pixels, pixel_count),
-                                                                         std::span(white_pixels, pixel_count),
-                                                                         std::span(cursor_pixels_, pixel_count));
-    destroy_dib_surface(black_dc, black_bitmap, black_old_bitmap, black_pixels);
-    destroy_dib_surface(white_dc, white_bitmap, white_old_bitmap, white_pixels);
+        DrawIconEx(white_surface.dc, 0, 0, cursor_info.hCursor, target_size.cx, target_size.cy, 0, nullptr, DI_NORMAL) != FALSE;
+    const bool composed = drawn && zmouse::render::compose_cursor_images(std::span(black_surface.pixels, pixel_count),
+                                                                         std::span(white_surface.pixels, pixel_count),
+                                                                         std::span(cursor_surface_.pixels, pixel_count));
     if (!composed)
     {
         destroy_cursor_bitmap();
@@ -782,7 +820,7 @@ bool OverlayManager::update_cursor_position(const overlay::Point cursor)
         .SourceConstantAlpha = static_cast<BYTE>(std::lround(focus_opacity_ * 255.0)),
         .AlphaFormat = AC_SRC_ALPHA,
     };
-    if (UpdateLayeredWindow(cursor_window_, nullptr, &destination, &size, cursor_dc_, &source, 0, &blend, ULW_ALPHA) ==
+    if (UpdateLayeredWindow(cursor_window_, nullptr, &destination, &size, cursor_surface_.dc, &source, 0, &blend, ULW_ALPHA) ==
         FALSE)
     {
         ShowWindow(cursor_window_, SW_HIDE);
@@ -837,6 +875,10 @@ void OverlayManager::destroy_windows() noexcept
     }
     for (const auto& overlay : overlays_)
     {
+        if (overlay.cached_hole != nullptr)
+        {
+            DeleteObject(overlay.cached_hole);
+        }
         DestroyWindow(overlay.window);
     }
     overlays_.clear();
@@ -845,23 +887,7 @@ void OverlayManager::destroy_windows() noexcept
 
 void OverlayManager::destroy_ring_bitmap() noexcept
 {
-    if (ring_dc_ != nullptr && ring_old_bitmap_ != nullptr)
-    {
-        SelectObject(ring_dc_, ring_old_bitmap_);
-    }
-    if (ring_bitmap_ != nullptr)
-    {
-        DeleteObject(ring_bitmap_);
-    }
-    if (ring_dc_ != nullptr)
-    {
-        DeleteDC(ring_dc_);
-    }
-
-    ring_dc_ = nullptr;
-    ring_bitmap_ = nullptr;
-    ring_old_bitmap_ = nullptr;
-    ring_pixels_ = nullptr;
+    ring_surface_.destroy();
     ring_bitmap_capacity_ = {};
     ring_size_ = {};
     ring_base_radius_px_ = 0;
@@ -875,7 +901,7 @@ void OverlayManager::destroy_ring_bitmap() noexcept
 
 void OverlayManager::destroy_cursor_bitmap() noexcept
 {
-    destroy_dib_surface(cursor_dc_, cursor_bitmap_, cursor_old_bitmap_, cursor_pixels_);
+    cursor_surface_.destroy();
     cursor_size_ = {};
     cursor_hotspot_ = {};
     rendered_cursor_ = nullptr;

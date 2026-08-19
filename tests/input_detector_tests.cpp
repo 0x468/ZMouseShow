@@ -1,5 +1,6 @@
 #include "zmouse/input/double_ctrl_detector.hpp"
 #include "zmouse/input/hotkey_detector.hpp"
+#include "zmouse/input/key_state_cache.hpp"
 #include "zmouse/input/overlay_input_rules.hpp"
 #include "zmouse/input/shake_detector.hpp"
 #include "zmouse/overlay/geometry.hpp"
@@ -46,6 +47,43 @@ void test_overlay_key_release_does_not_dismiss()
     check(should_dismiss_overlay_for_key_event(true, true, false), "a new key press dismisses the visible overlay");
     check(!should_dismiss_overlay_for_key_event(false, true, false),
           "keyboard input does not request dismissal while the overlay is hidden");
+}
+
+void test_key_state_cache_tracks_only_real_transitions()
+{
+    zmouse::input::KeyStateCache cache;
+    constexpr std::size_t letter_a = 65;
+    constexpr std::size_t letter_b = 66;
+    constexpr std::size_t control = 17;
+    constexpr std::size_t shift = 16;
+
+    const auto unmatched_release = cache.update(letter_a, false, false);
+    check(!unmatched_release.changed && cache.non_modifier_count() == 0,
+          "an unmatched key-up does not decrement another key");
+
+    const auto first_press = cache.update(letter_a, true, false);
+    const auto repeated_press = cache.update(letter_a, true, false);
+    check(first_press.changed && !first_press.repeated && repeated_press.repeated && !repeated_press.changed,
+          "repeat input does not inflate the key count");
+    check(!cache.any_other_non_modifier(letter_a, false), "the current key is excluded from the other-key query");
+
+    static_cast<void>(cache.update(letter_b, true, false));
+    check(cache.any_other_non_modifier(letter_a, false), "a second non-modifier is detected in O(1)");
+    static_cast<void>(cache.update(letter_b, false, false));
+    static_cast<void>(cache.update(letter_a, false, false));
+
+    static_cast<void>(cache.update(shift, true, true));
+    static_cast<void>(cache.update(control, true, true));
+    check(cache.any_other_key(control, true), "a held Shift blocks a clean Ctrl gesture");
+    check(!cache.any_other_non_modifier(control, true),
+          "modifier-only conflicts stay separate from hotkey key conflicts");
+
+    static_cast<void>(cache.update(shift, false, true));
+    check(!cache.any_other_key(control, true), "the current Ctrl is not treated as another held key");
+
+    cache.reset();
+    check(cache.non_modifier_count() == 0 && cache.modifier_count() == 0 && !cache.is_down(letter_a),
+          "resynchronization resets cached states and counters together");
 }
 
 void test_clean_double_ctrl_triggers()
@@ -362,7 +400,7 @@ void test_locator_animation_transitions()
               middle.ripple_opacity < 1.0,
           "the ripple expands and fades over time");
 
-    const auto shown = animation.frame(1'180);
+    const auto shown = animation.frame(1'220);
     check(shown.surface_visible && !shown.needs_more_frames, "fade-in reaches a stable visible state");
     check(shown.dim_progress == 1.0 && shown.focus_opacity == 1.0 && shown.ripple_scale == 1.75 &&
               shown.ripple_opacity == 0.0,
@@ -373,7 +411,7 @@ void test_locator_animation_transitions()
     check(fading.surface_visible && fading.needs_more_frames, "hide starts a fade-out transition");
     check(fading.dim_progress > 0.0 && fading.dim_progress < 1.0, "fade-out reduces dim opacity");
 
-    const auto hidden = animation.frame(2'180);
+    const auto hidden = animation.frame(2'220);
     check(!hidden.surface_visible && !hidden.needs_more_frames, "fade-out finishes hidden");
     check(animation.phase() == zmouse::overlay::AnimationPhase::hidden, "finished fade-out resets the state");
 }
@@ -411,6 +449,7 @@ int main()
 {
     test_overlay_trigger_routing_state_matrix();
     test_overlay_key_release_does_not_dismiss();
+    test_key_state_cache_tracks_only_real_transitions();
     test_clean_double_ctrl_triggers();
     test_disabled_double_ctrl_never_starts_a_candidate();
     test_ctrl_chords_cancel_candidate();
