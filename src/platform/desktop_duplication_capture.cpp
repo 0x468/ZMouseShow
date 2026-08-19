@@ -227,9 +227,12 @@ capture::FrameResult DesktopDuplicationCapture::acquire_frame(ID3D11Texture2D** 
                    ? capture::FrameResult::rebuild_required
                    : capture::FrameResult::unavailable;
     }
-    impl_->pointer.visible = frame_info.PointerPosition.Visible != FALSE;
-    impl_->pointer.position = frame_info.PointerPosition.Position;
-    if (frame_info.PointerShapeBufferSize > 0)
+    if (frame_info.LastMouseUpdateTime.QuadPart != 0)
+    {
+        impl_->pointer.visible = frame_info.PointerPosition.Visible != FALSE;
+        impl_->pointer.position = frame_info.PointerPosition.Position;
+    }
+    if (frame_info.LastMouseUpdateTime.QuadPart != 0 && frame_info.PointerShapeBufferSize > 0)
     {
         try
         {

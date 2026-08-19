@@ -72,9 +72,9 @@ int main()
         }
 
         const auto started_at = Clock::now();
-        const bool visible = window.render(capture, cursor, dpi_x);
+        const auto render_result = window.render(capture, cursor, dpi_x);
         const auto finished_at = Clock::now();
-        if (visible && !first_frame_seen)
+        if (render_result == zmouse::platform::MagnifierRenderResult::presented && !first_frame_seen)
         {
             first_frame_seen = true;
             first_frame_at = finished_at;

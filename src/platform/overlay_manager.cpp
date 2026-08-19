@@ -450,7 +450,7 @@ bool OverlayManager::apply_hole(MonitorOverlay& monitor_overlay, const overlay::
         monitor_overlay.cached_hole = create_spotlight_region(origin_hole, spotlight_shape_);
         monitor_overlay.cached_hole_shape = spotlight_shape_;
         monitor_overlay.cached_hole_radius = radius_px;
-        monitor_overlay.cached_hole_at = {-1, -1};
+        monitor_overlay.cached_hole_at = {0, 0};
     }
     if (monitor_overlay.cached_hole == nullptr)
     {
@@ -630,15 +630,19 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) noexcept
             .SourceConstantAlpha = 255,
             .AlphaFormat = AC_SRC_ALPHA,
         };
-        if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_surface_.dc, &source, 0, &blend, ULW_ALPHA) ==
-            FALSE)
+        if (UpdateLayeredWindow(ring_window_, nullptr, &destination, &size, ring_surface_.dc, &source, 0, &blend,
+                                ULW_ALPHA) == FALSE)
+        {
+            return false;
+        }
+        if (SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE)
         {
             return false;
         }
         ring_bitmap_dirty_ = false;
         ring_window_pos_ = destination;
-        return SetWindowPos(ring_window_, HWND_TOPMOST, 0, 0, 0, 0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+        return true;
     }
 
     // Skip SetWindowPos if position hasn't changed
@@ -646,9 +650,13 @@ bool OverlayManager::update_ring_position(const overlay::Point cursor) noexcept
     {
         return true;
     }
+    if (SetWindowPos(ring_window_, HWND_TOPMOST, destination.x, destination.y, 0, 0,
+                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) == FALSE)
+    {
+        return false;
+    }
     ring_window_pos_ = destination;
-    return SetWindowPos(ring_window_, HWND_TOPMOST, destination.x, destination.y, 0, 0,
-                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE;
+    return true;
 }
 
 bool OverlayManager::ensure_cursor_bitmap(const UINT dpi)

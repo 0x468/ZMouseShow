@@ -484,6 +484,10 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
         .remote_session = false,
         .custom_hotkey_registered = true,
         .startup_registered = true,
+        .cached_mouse_button_down = true,
+        .cached_non_modifier_keys = 2,
+        .cached_modifier_keys = 1,
+        .input_resync_count = 7,
         .virtual_desktop = {-2560, 0, 2560, 1440},
         .monitors = {{.device_name = "DISPLAY1",
                       .bounds = {-2560, 0, 0, 1440},
@@ -524,6 +528,11 @@ void test_diagnostics_report_contains_effective_state_without_input_history()
           "diagnostics expose the non-sensitive runtime state needed to diagnose trigger routing");
     check(report.find("startup_registered: true") != std::string::npos,
           "diagnostics include the effective startup registration state");
+    check(report.find("input.cached_mouse_button_down: true") != std::string::npos &&
+              report.find("input.cached_non_modifier_keys: 2") != std::string::npos &&
+              report.find("input.cached_modifier_keys: 1") != std::string::npos &&
+              report.find("input.resync_count: 7") != std::string::npos,
+          "diagnostics expose aggregate cached-input health without recording input history");
     check(report.find("overlay.shape: circle") != std::string::npos,
           "diagnostics report the effective spotlight shape");
     check(report.find("effects.ripple_enabled: true") != std::string::npos &&

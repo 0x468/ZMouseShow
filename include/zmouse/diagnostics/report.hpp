@@ -1,7 +1,7 @@
 #pragma once
 
-#include "zmouse/config/settings.hpp"
 #include "zmouse/capture/capture_backend.hpp"
+#include "zmouse/config/settings.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -42,6 +42,10 @@ struct Snapshot
     bool remote_session{};
     bool custom_hotkey_registered{};
     bool startup_registered{};
+    bool cached_mouse_button_down{};
+    int cached_non_modifier_keys{};
+    int cached_modifier_keys{};
+    std::uint64_t input_resync_count{};
     Rect virtual_desktop{};
     std::vector<Monitor> monitors;
     config::Settings settings{};

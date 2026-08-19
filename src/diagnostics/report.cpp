@@ -95,7 +95,11 @@ std::string build_report(const Snapshot& snapshot)
            << "settings_dialog_open: " << boolean(snapshot.settings_dialog_open) << '\n'
            << "remote_session: " << boolean(snapshot.remote_session) << '\n'
            << "custom_hotkey_registered: " << boolean(snapshot.custom_hotkey_registered) << '\n'
-           << "startup_registered: " << boolean(snapshot.startup_registered) << "\n\n"
+           << "startup_registered: " << boolean(snapshot.startup_registered) << '\n'
+           << "input.cached_mouse_button_down: " << boolean(snapshot.cached_mouse_button_down) << '\n'
+           << "input.cached_non_modifier_keys: " << snapshot.cached_non_modifier_keys << '\n'
+           << "input.cached_modifier_keys: " << snapshot.cached_modifier_keys << '\n'
+           << "input.resync_count: " << snapshot.input_resync_count << "\n\n"
            << "Display topology\n"
            << "----------------\n"
            << "virtual_desktop: ";

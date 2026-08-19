@@ -77,6 +77,7 @@ target_link_libraries(ZMouseShow
         shell32
         shcore
         user32
+        wtsapi32
 )
 target_compile_definitions(ZMouseShow PRIVATE ZMOUSE_VERSION="${PROJECT_VERSION}")
 zmouse_apply_project_options(ZMouseShow)
@@ -168,6 +169,7 @@ if(BUILD_TESTING)
             d3d11
             dcomp
             dxgi
+            magnification
             psapi
             shcore
             user32
